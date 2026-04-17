@@ -42,6 +42,54 @@ downstream of schema drift.
 - If you decide to continue: copy `~/home-assistant/integrations/_template/`
   to `~/home-assistant/integrations/<name>/` and fill the README.
 
+## Step 1b. Learn the repo's conventions before coding
+
+Before touching the code, read:
+
+1. **`CONTRIBUTING.md`** at the repo root (and `.github/CONTRIBUTING.md`,
+   `docs/CONTRIBUTING.md`). Typical signal: required tooling (poetry,
+   uv, pre-commit), branch naming pattern (`bug/`, `fix/`, `feature/`),
+   test command, whether PRs need an issue first.
+2. **`.github/PULL_REQUEST_TEMPLATE.md`** if it exists - copy the
+   structure for your PR body later.
+3. **`.github/ISSUE_TEMPLATE/`** - reveals how the maintainer
+   categorises bug vs feature reports; useful when writing the issue
+   comment and the PR cross-reference.
+4. **`pyproject.toml`** / **`setup.cfg`** / **`.pre-commit-config.yaml`** -
+   the actual lint/format rules you have to pass. Check `tool.ruff`
+   for `select = ["ALL"]` (very strict), codespell dictionaries, mypy
+   strictness.
+
+**If there is no `CONTRIBUTING.md`**, study the 10-20 most recent
+merged PRs to infer the conventions from practice:
+
+```bash
+gh pr list --repo <org>/<repo> --state merged --limit 20 \
+  --json number,title,author --jq '.[] | "\(.author.login): \(.title)"'
+```
+
+Filter out bot PRs (renovate, dependabot, github-actions). Look at
+human-authored PRs for:
+
+- **Title style**: Conventional Commits (`fix:`, `feat:`, `chore:`)?
+  Sentence case vs lowercase? Imperative vs past tense?
+- **Commit count per PR**: squash-merged (one commit) or
+  merge-commit (multiple commits kept)? If squash, only the PR title
+  matters for history. If merge-commit, each commit message should
+  be clean.
+- **Body format**: Do merged PRs include a Summary / Changes / Tests
+  section? Paste-quoted tracebacks? Screenshots?
+- **Branch naming**: inspect `pr.headRefName` via
+  `gh pr view <num> --repo <org>/<repo> --json headRefName`.
+- **Test expectations**: do merged fix-PRs add regression tests? If
+  yes, add one for your bug too.
+
+If the codeowners (`CODEOWNERS` file or `codeowners:` in manifest)
+have recent PRs, prioritise their style - they're the reviewers.
+
+Document what you find in the integration folder's `notes.md` so the
+next fix in the same repo doesn't require re-discovery.
+
 ## Step 2. Reproduce locally
 
 - Find the credentials for the integration:
