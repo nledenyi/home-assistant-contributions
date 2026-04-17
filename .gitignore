@@ -1,0 +1,46 @@
+# Never commit secrets / PII - defensive even after the audit.
+# See commit history of this file for scope rationale.
+
+# Environment / credentials
+.env
+.env.*
+*.env
+secrets.yaml
+credentials*
+*.pem
+*.key
+*_rsa
+*_ed25519
+*.pat
+.netrc
+
+# Backup / scratch
+*.bak
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Python build artefacts
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+build/
+dist/
+*.egg-info/
+
+# Private references that should never leak here
+references/hacs-installed.md
+integrations/*/notes-private.md
+integrations/*/credentials.md
+
+# IDE noise
+.vscode/
+.idea/
+
+# Lock files - we don't ship any runnable code from this repo
+poetry.lock
+package-lock.json
+yarn.lock
