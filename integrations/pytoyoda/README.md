@@ -1,6 +1,18 @@
-# pytoyoda (summary schema drift)
+# pytoyoda / ha_toyota fixes
 
-## TL;DR
+Two independent bugs surfaced by the same community-reported thread:
+
+1. **Summary schema drift** in `pytoyoda`: `TypeError` / `AttributeError` crashes when Toyota's `/v1/trips` returns partial payloads. See below.
+2. **Memory leak** in `ha_toyota`: the `_run_pytoyoda_sync` wrapper allocates a fresh asyncio event loop per call, leaking ~500 KB per invocation. Separate issue, separate PR. See [`memory-leak-fix.md`](memory-leak-fix.md) for the full walk-through (diagnosis, git blame, measurement methodology, patch, validation).
+
+| Fix | Repo | Branch | Tracking issue | PR state |
+|---|---|---|---|---|
+| Summary schema drift | pytoyoda | [`bug/summary-none-handling`](https://github.com/nledenyi/pytoyoda/tree/bug/summary-none-handling) | [ha_toyota#278](https://github.com/pytoyoda/ha_toyota/issues/278) | [pytoyoda#249](https://github.com/pytoyoda/pytoyoda/pull/249) open, CI green, awaiting review |
+| Memory leak | ha_toyota | [`bug/memory-leak-direct-await`](https://github.com/nledenyi/ha_toyota/tree/bug/memory-leak-direct-await) | [ha_toyota#282](https://github.com/pytoyoda/ha_toyota/issues/282) | PR draft ready, locally validated; see [`ha_toyota-282-PR-body.md`](ha_toyota-282-PR-body.md) |
+
+---
+
+## Schema-drift fix (ha_toyota#278 / pytoyoda#249)
 
 - **Component package**: `pytoyoda` (used by Toyota EU community HA integration)
 - **HA custom_components folder**: `/config/custom_components/toyota`

@@ -117,6 +117,89 @@ auto-reinstall on next startup.
 8. `gh pr create` with a body file so the markdown formats correctly.
 9. Cross-post a workaround on the downstream integration issue.
 
+## Perf / leak fixes
+
+### Empirical proof before claiming a fix works
+
+If the bug is about memory, CPU, or request-rate rather than a
+functional crash, **design the measurement before you write the fix**.
+A one-sentence "the code now does X instead of Y" is not enough to
+carry a review of a perf change.
+
+Shape of a reliable memory-leak measurement:
+
+- **One knob** that makes the integration do more or less work (usually
+  the coordinator interval, or an automation wrapping
+  `homeassistant.update_entity`).
+- **Two phases, same sample cadence**: 60 min with knob OFF (baseline),
+  180 min with knob ON (test). Sample every 120 s.
+- **Run detached** (nohup + disown) so the sampler survives session
+  disconnects. Write to a log file.
+- **Stub the side effects**: if the sampler needs to toggle HA, use the
+  REST API with a per-run config override, don't mutate your real
+  setup. If you're measuring memory, disable the Telegram/email/RGB
+  hooks (replace the senders with tee stubs) so re-runs don't spam.
+- **Wait for HA to stabilise before starting**: three consecutive RSS
+  samples within 30 MB is a good plateau check. Fresh-restart HA
+  ramps from ~1 GB to ~2-3 GB as integrations finish loading; sampling
+  too early gives a false "baseline drift".
+- **Analyse with regression**: slope (MB/hour) of the test phase minus
+  the baseline phase = leak rate attributable to the knob. Break into
+  per-30-min bins to distinguish linear growth (leak) from decelerating
+  growth (warmup tail).
+
+Repeat the entire run post-fix. Success = test slope ≈ baseline slope,
+or test phase decelerates across bins.
+
+Real measurement from the pytoyoda leak investigation:
+
+| phase | pre-fix | post-fix |
+|---|---|---|
+| baseline slope | -2.5 MB/h | +26.5 MB/h (HA warmup) |
+| test slope | +24.8 MB/h | +9.1 MB/h |
+| attributable leak | **+27 MB/h** | indistinguishable from zero |
+
+### The HA blocking-call watchdog antipattern
+
+HA logs `Detected blocking call to <X> inside the event loop` when
+anything synchronous (SSL cert load, file read, `socket.getaddrinfo`)
+runs on the main event loop. A common "fix" is to wrap the async call
+chain in:
+
+```python
+def _run_sync(coro):
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+await hass.async_add_executor_job(_run_sync, my_async_call())
+```
+
+This does silence the warning — the blocking call now happens in a
+thread, off the main loop — but at the cost of a fresh event loop +
+fresh httpx client + fresh SSL context + fresh connection pool **per
+call**. Those short-lived structures leak small amounts of state when
+torn down. Over thousands of refresh cycles it's a visible RSS ramp.
+
+Diagnostic signal: git blame the wrapper. If the commit message
+mentions "blocking call", "avoid blocking", or names the specific HA
+warning (`load_verify_locations`, `block_async_io`), you're looking at
+this pattern.
+
+**Correct fixes:**
+
+1. If the blocking call is just the CA-bundle load, pre-create the SSL
+   context / httpx client in an executor **once** at
+   `async_setup_entry` and reuse it.
+2. Better: share HA's pre-built `httpx.AsyncClient` via
+   `homeassistant.helpers.httpx_client.get_async_client(hass)` and
+   teach the underlying client library to accept it as a constructor
+   arg.
+3. Quickest fix for a leak PR: delete the wrapper, accept the warning
+   returning at setup. Followup PR for the shared-client pattern.
+
 ## Project-management patterns
 
 ### Keep forks tidy

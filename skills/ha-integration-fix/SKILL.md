@@ -12,8 +12,8 @@ Python client (e.g. `ha_toyota` -> `pytoyoda`, `Mammotion-HA` ->
 `pymammotion`). The PR almost always goes to the client repo. The issue
 usually lives on the integration repo. Keep that asymmetry in mind.
 
-See `/home/claude/home-assistant/LESSONS.md` for gotchas. See
-`/home/claude/home-assistant/integrations/_template/` for the folder
+See `~/home-assistant/LESSONS.md` for gotchas. See
+`~/home-assistant/integrations/_template/` for the folder
 structure to bootstrap.
 
 ## Step 0. Orient
@@ -41,6 +41,39 @@ downstream of schema drift.
   issue with your diagnosis instead of a PR. Let them move first.
 - If you decide to continue: copy `~/home-assistant/integrations/_template/`
   to `~/home-assistant/integrations/<name>/` and fill the README.
+
+### Common "symptom treatment" patterns to watch for
+
+Integrations frequently accumulate patches that silence a warning
+rather than fix the underlying cause. `git blame` the suspect code
+before writing a fix - the commit message usually names the warning
+the author was trying to dismiss, which gives you both the diplomatic
+framing for your PR and a clearer picture of the real bug.
+
+Two patterns I've repeatedly seen:
+
+1. **The HA blocking-call watchdog antipattern.**
+   HA logs `Detected blocking call to <X> inside the event loop` when
+   anything synchronous (SSL cert load, file read, `socket.getaddrinfo`)
+   runs on the main event loop. A common "fix" is to wrap the offending
+   async call in `hass.async_add_executor_job(
+   asyncio.new_event_loop().run_until_complete, coro)` or an inner
+   `_run_sync` helper. This silences the warning by moving the blocking
+   call to a thread, but at the cost of a fresh event loop + fresh
+   httpx client + fresh SSL context + fresh connection pool **per
+   call**. Those short-lived structures leak small amounts of state
+   when torn down. Over thousands of refresh cycles it's a clear RSS
+   ramp.
+   Correct fix: either pre-create the SSL context / httpx client in an
+   executor **once** at `async_setup_entry` and reuse it, or (better)
+   share HA's shared `httpx.AsyncClient` via
+   `homeassistant.helpers.httpx_client.get_async_client(hass)` and
+   teach the underlying client library to accept an externally-supplied
+   client.
+
+2. **Swallowing exceptions to silence noisy error logs** — often hides
+   the real retry path the integration should have had. Fix retry
+   policy upstream, don't hide the error.
 
 ## Step 1b. Learn the repo's conventions before coding
 
@@ -132,6 +165,44 @@ contributing doc before pushing.
   when the repo's merged history uses them. Check `git log` on main.
 - No em dashes in commit messages (replace with regular dash). No AI
   slop ("Let me...", "I'll now..."), no emoji.
+
+## Step 4b. For perf/leak bugs: before-and-after measurement
+
+If the bug is about memory, CPU, or request-rate rather than a
+functional crash, design the measurement before you write the fix. A
+fix is only credible if you can show a signal in controlled conditions.
+
+Typical shape for a memory-leak investigation:
+
+1. **Identify one easily-toggled knob** that makes the integration do
+   more or less work. For cloud-polling integrations this is usually
+   the refresh interval or an automation that wraps the coordinator's
+   update call.
+2. **Write a stub harness** that captures output without triggering
+   side effects. For RSS measurement, sample
+   `ps -eo rss,comm --sort=-rss | awk 'NR==2 {print $1}'` inside the
+   HA VM every 60-120s.
+3. **Two-phase sampler**: 60 min with the knob OFF (baseline), 180 min
+   with the knob ON (test). Hard automation toggles at phase boundary,
+   same sample cadence in both phases.
+4. **Run detached** (nohup + disown) so the harness survives Claude
+   session disconnects. Write to a log file.
+5. **Analyse**: linear regression on the test phase slope minus
+   baseline slope = the leak rate attributable to the toggle.
+   Per-30-min bin averages to rule out asymptotic warmup vs linear
+   leak.
+6. **Repeat post-fix** with the same harness. Success criterion:
+   test slope ≈ baseline slope, or test decelerates (asymptotic
+   warmup after restart) rather than grows linearly.
+
+Wait for HA Core RSS to stabilise before starting the sampler (three
+consecutive samples within 30 MB is a reasonable stability check).
+Fresh-restart HA shows ~1-1.5 GB RSS that ramps to ~2-3 GB as
+integrations finish loading, which will contaminate a baseline
+sampled too early.
+
+**Do not skip this step and claim a fix works based on "the code
+looks right now".** Empirical proof is what earns you the PR review.
 
 ## Step 5. Test
 
