@@ -8,7 +8,7 @@ Public portfolio of Home Assistant-adjacent work: integration bug fixes, dashboa
 |---|---|---|---|
 | pymammotion (work_zone stale read) | Maintainer merged equivalent fix | [Mammotion-HA#365](https://github.com/mikey0000/Mammotion-HA/issues/365) | [`integrations/pymammotion/`](integrations/pymammotion/) |
 | pytoyoda (summary schema drift) | PR open | [pytoyoda/pytoyoda#249](https://github.com/pytoyoda/pytoyoda/pull/249), [ha_toyota#278](https://github.com/pytoyoda/ha_toyota/issues/278) | [`integrations/pytoyoda/`](integrations/pytoyoda/) |
-| ha_toyota (`_run_pytoyoda_sync` memory leak, ~500 KB per pytoyoda call) | Patch validated locally (pre/post RSS trace), PR draft ready | [ha_toyota#282](https://github.com/pytoyoda/ha_toyota/issues/282) | [`integrations/pytoyoda/memory-leak-fix.md`](integrations/pytoyoda/memory-leak-fix.md) |
+| ha_toyota (`_run_pytoyoda_sync` memory leak, ~500 KB per pytoyoda call) | PR open, reporter confirmed | [pytoyoda/ha_toyota#283](https://github.com/pytoyoda/ha_toyota/pull/283), [ha_toyota#282](https://github.com/pytoyoda/ha_toyota/issues/282) | [`integrations/pytoyoda/memory-leak-fix.md`](integrations/pytoyoda/memory-leak-fix.md) |
 
 ## Dashboards
 

@@ -5,7 +5,7 @@
 
 ## Environment
 
-- HA Core 2026.4.2 (reproduced on a HAOS 17.2 VM per [#282](https://github.com/pytoyoda/ha_toyota/issues/282))
+- HA Core 2026.4.3 (reproduced on a HAOS 17.2 VM per [#282](https://github.com/pytoyoda/ha_toyota/issues/282))
 - pytoyoda 5.0.0 (including the #249 schema-drift branch installed for testing)
 - 2-vehicle account on the Toyota EU community integration
 
@@ -52,7 +52,7 @@ Net Toyota-attributable leak rate: **+27 MB/hour at 15-min refresh**. Extrapolat
 | Baseline | 60 min | none | +21 MB | +26.5 MB/h |
 | Test | 180 min | every 15 min | +35 MB | +9.1 MB/h |
 
-The post-fix baseline drift is HA finishing its normal startup ramp (HA had only been up ~17 min when the phase started), not a continuing leak. The test phase grows **slower** than the baseline — the opposite of what a persistent leak would produce. Per-30-min bins in the test phase show decelerating growth consistent with asymptotic warmup to steady state.
+The post-fix baseline drift is HA finishing its normal startup ramp (HA had only been up ~17 min when the phase started), not a continuing leak. The test phase grows **slower** than the baseline - the opposite of what a persistent leak would produce. Per-30-min bins in the test phase show decelerating growth consistent with asymptotic warmup to steady state.
 
 ## Expected behaviour
 
@@ -72,18 +72,22 @@ The warning is noisy but not fatal; the memory leak was continuous and would eve
 
 Permanent fix for the blocking call needs a coordinated change across both repos so pytoyoda accepts an externally-supplied `httpx.AsyncClient`, and ha_toyota passes `homeassistant.helpers.httpx_client.get_async_client(hass)` at setup. That eliminates the warning, reuses TCP/TLS via HTTP keep-alive (which also plausibly reduces the 429 rate-limit rate by avoiding fresh TLS sessions), and is the standard HA integration pattern. I'll open it as a separate PR against pytoyoda once this lands.
 
+## Independent confirmation on a second install
+
+`@alpy-nz` (the reporter of #282) installed this patched `__init__.py` on their own HA (HAOS, HA Core 2026.4.3, different account, default 6-min refresh) and confirmed: memory flat, vehicle status populated correctly, and a reduction in "unavailable" flips for vehicle-variable sensors that they had previously attributed to Toyota rate-limiting. See the confirmation at [ha_toyota#282 comments](https://github.com/pytoyoda/ha_toyota/issues/282).
+
 ## Tests
 
 `poetry run pre-commit run --all-files` clean on the branch (see commit SHA below).
 
-No new unit tests — the change is a deletion of plumbing with no new code path to cover. End-to-end validation via the measurement above.
+No new unit tests - the change is a deletion of plumbing with no new code path to cover. End-to-end validation via the measurements above.
 
 ## Checklist
 
 - [x] Conforms to branch naming (`bug/...`) per CONTRIBUTING.md
 - [x] `poetry run pre-commit run --all-files` clean
-- [x] Tested end-to-end on HA Core 2026.4.2 with a 2-vehicle account
+- [x] Tested end-to-end on HA Core 2026.4.3 with a 2-vehicle account
 - [x] Before/after RSS trace reproduces the reported leak and shows it eliminated
-- [x] No functional regression — odometer sensor populated correctly post-patch
+- [x] No functional regression - odometer sensor populated correctly post-patch
 
 Addresses #282.

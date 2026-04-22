@@ -8,7 +8,7 @@ Two independent bugs surfaced by the same community-reported thread:
 | Fix | Repo | Branch | Tracking issue | PR state |
 |---|---|---|---|---|
 | Summary schema drift | pytoyoda | [`bug/summary-none-handling`](https://github.com/nledenyi/pytoyoda/tree/bug/summary-none-handling) | [ha_toyota#278](https://github.com/pytoyoda/ha_toyota/issues/278) | [pytoyoda#249](https://github.com/pytoyoda/pytoyoda/pull/249) open, CI green, awaiting review |
-| Memory leak | ha_toyota | [`bug/memory-leak-direct-await`](https://github.com/nledenyi/ha_toyota/tree/bug/memory-leak-direct-await) | [ha_toyota#282](https://github.com/pytoyoda/ha_toyota/issues/282) | PR draft ready, locally validated; see [`ha_toyota-282-PR-body.md`](ha_toyota-282-PR-body.md) |
+| Memory leak | ha_toyota | [`bug/memory-leak-direct-await`](https://github.com/nledenyi/ha_toyota/tree/bug/memory-leak-direct-await) | [ha_toyota#282](https://github.com/pytoyoda/ha_toyota/issues/282) | [pytoyoda/ha_toyota#283](https://github.com/pytoyoda/ha_toyota/pull/283) open, reporter @alpy-nz confirmed the fix |
 
 ---
 

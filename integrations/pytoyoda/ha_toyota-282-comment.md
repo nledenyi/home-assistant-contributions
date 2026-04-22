@@ -21,7 +21,7 @@ The wrapper was added in #171 to silence HA's "Detected blocking call to `load_v
 
 ### The fix
 
-Delete the wrapper. `pytoyoda` is already fully async, and HA's coordinator runs in HA's main event loop — there's no reason to route through a new loop in an executor thread. Replace every `hass.async_add_executor_job(_run_pytoyoda_sync, X)` with `await X`. Same for the `_sync_login` helper. `MyT(...)` construction moves out of the executor (it does no I/O).
+Delete the wrapper. `pytoyoda` is already fully async, and HA's coordinator runs in HA's main event loop - there's no reason to route through a new loop in an executor thread. Replace every `hass.async_add_executor_job(_run_pytoyoda_sync, X)` with `await X`. Same for the `_sync_login` helper. `MyT(...)` construction moves out of the executor (it does no I/O).
 
 Diff: +13 / −55 lines in one file. No dependency or behaviour changes.
 
@@ -64,7 +64,7 @@ ha core restart
 
 - **Memory**: flat. You can re-run your screenshot experiment: let HA run for a few hours with the integration enabled and watch the RSS curve level off instead of ramping.
 - **Functionality**: sensors populate as before; no entity changes, no config changes.
-- **Log**: HA's watchdog will start logging `Detected blocking call to load_verify_locations` warnings again at setup and whenever pytoyoda constructs a new `httpx.AsyncClient`. Expected and noted — that's the original symptom that #171 tried to suppress. Noisy but not fatal, and a clearly better trade than a continuous memory leak. A proper fix for that warning is a follow-up PR that needs a coordinated pytoyoda + ha_toyota change so we can share a single `httpx.AsyncClient` across requests; that will also reduce TLS handshake load and plausibly the 429 rate-limit rate.
+- **Log**: HA's watchdog will start logging `Detected blocking call to load_verify_locations` warnings again at setup and whenever pytoyoda constructs a new `httpx.AsyncClient`. Expected and noted - that's the original symptom that #171 tried to suppress. Noisy but not fatal, and a clearly better trade than a continuous memory leak. A proper fix for that warning is a follow-up PR that needs a coordinated pytoyoda + ha_toyota change so we can share a single `httpx.AsyncClient` across requests; that will also reduce TLS handshake load and plausibly the 429 rate-limit rate.
 
 ### Rollback
 

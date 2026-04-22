@@ -177,8 +177,8 @@ def _run_sync(coro):
 await hass.async_add_executor_job(_run_sync, my_async_call())
 ```
 
-This does silence the warning — the blocking call now happens in a
-thread, off the main loop — but at the cost of a fresh event loop +
+This does silence the warning - the blocking call now happens in a
+thread, off the main loop - but at the cost of a fresh event loop +
 fresh httpx client + fresh SSL context + fresh connection pool **per
 call**. Those short-lived structures leak small amounts of state when
 torn down. Over thousands of refresh cycles it's a visible RSS ramp.
