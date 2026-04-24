@@ -7,8 +7,8 @@ Two independent bugs surfaced by the same community-reported thread:
 
 | Fix | Repo | Branch | Tracking issue | PR state |
 |---|---|---|---|---|
-| Summary schema drift | pytoyoda | [`bug/summary-none-handling`](https://github.com/nledenyi/pytoyoda/tree/bug/summary-none-handling) | [ha_toyota#278](https://github.com/pytoyoda/ha_toyota/issues/278) | [pytoyoda#249](https://github.com/pytoyoda/pytoyoda/pull/249) open, CI green, awaiting review |
-| Memory leak | ha_toyota | [`bug/memory-leak-direct-await`](https://github.com/nledenyi/ha_toyota/tree/bug/memory-leak-direct-await) | [ha_toyota#282](https://github.com/pytoyoda/ha_toyota/issues/282) | [pytoyoda/ha_toyota#283](https://github.com/pytoyoda/ha_toyota/pull/283) open, reporter @alpy-nz confirmed the fix |
+| Summary schema drift | pytoyoda | [`bug/summary-none-handling`](https://github.com/nledenyi/pytoyoda/tree/bug/summary-none-handling) | [ha_toyota#278](https://github.com/pytoyoda/ha_toyota/issues/278) | [pytoyoda#249](https://github.com/pytoyoda/pytoyoda/pull/249) open, CI green, awaiting review. Competing minimal patch [pytoyoda#251](https://github.com/pytoyoda/pytoyoda/pull/251) posted separately; overlap flagged in [`pytoyoda-251-overlap.md`](pytoyoda-251-overlap.md) |
+| Memory leak | ha_toyota | [`bug/memory-leak-direct-await`](https://github.com/nledenyi/ha_toyota/tree/bug/memory-leak-direct-await) | [ha_toyota#282](https://github.com/pytoyoda/ha_toyota/issues/282) | [ha_toyota#283](https://github.com/pytoyoda/ha_toyota/pull/283) open. Reporter @alpy-nz and @Paja-git both confirmed fix; @arhimidis64 reports residual ramp in their specific install, memray follow-up posted (see [`ha_toyota-282-memray-followup.md`](ha_toyota-282-memray-followup.md)) |
 
 ---
 

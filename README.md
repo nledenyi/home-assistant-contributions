@@ -28,7 +28,8 @@ Public portfolio of Home Assistant-adjacent work: integration bug fixes, dashboa
 1. [`LESSONS.md`](LESSONS.md) - cross-cutting patterns from past fixes worth revisiting before diving in.
 2. [`references/cheatsheet.md`](references/cheatsheet.md) - HA operations that come up repeatedly (restart, log extraction, container shell, config entry reload).
 3. [`references/ha-api.md`](references/ha-api.md) - REST + WebSocket endpoints, token locations.
-4. [`integrations/_template/`](integrations/_template/) - skeleton to copy when starting a new integration investigation.
+4. [`references/memray-on-haos.md`](references/memray-on-haos.md) - allocation profiling a live HA process on HAOS (Alpine/musllinux).
+5. [`integrations/_template/`](integrations/_template/) - skeleton to copy when starting a new integration investigation.
 
 ## Notes
 

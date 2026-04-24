@@ -235,3 +235,43 @@ Just file an issue if:
 - Bug is cosmetic or partial (integration mostly works).
 - Maintainer is active (recent commits / responsive issues).
 - You cannot reliably reproduce.
+
+## HAOS-specific debugging
+
+### py-spy doesn't work on HAOS, memray does
+
+HA Core's container runs on Alpine Linux with musl libc. py-spy's bundled
+libunwind is glibc-linked; `apk add libunwind` does NOT fix it (wheel
+expects specific-hashed `.so` names Alpine doesn't provide).
+
+Use memray instead - a native Python profiler that works cleanly on
+CPython 3.14 + Alpine. Gives you file:line resolution for "where is my
+process holding memory" questions that RSS sampling can't answer.
+
+See [`references/memray-on-haos.md`](references/memray-on-haos.md) for the
+full recipe, including the `memray detach <PID>` (not `--stop`) gotcha for
+stopping an indefinite attach.
+
+### `OptionsFlow.config_entry` is read-only in HA 2024.11+
+
+Many older tutorials show `def __init__(self, config_entry):
+self.config_entry = config_entry`. Since HA 2024.11, that raises
+`AttributeError: property has no setter`. Omit `__init__` entirely; the
+base class wires it. `async_get_options_flow(cls, config_entry)` returns
+the options-flow instance with NO argument.
+
+### entity_id slug is computed BEFORE translations load
+
+Relying on `translation_key=` alone for entity friendly names gives
+correct display strings but degenerate entity_ids like `sensor.rav4`,
+`sensor.rav4_2`, `sensor.rav4_3`. The slug is generated from `name=` at
+registration time; translations haven't loaded yet. Always set BOTH
+`name=` (ASCII fallback for the slug) AND `translation_key=` (for the
+localized runtime display).
+
+### Disable/enable a config entry does not re-import config_flow
+
+If you're iterating on `config_flow.py`, the disable/enable cycle runs
+`async_setup_entry` again but the config_flow module is already cached in
+Python. You need a full `ha core restart` to bust the cache. Symptom: you
+edit the schema, click Configure, still see the old form.
