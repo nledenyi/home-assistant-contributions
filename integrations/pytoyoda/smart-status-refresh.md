@@ -11,7 +11,7 @@ and [memory leak](memory-leak-fix.md)).
 | Component | `pytoyoda` (Python client) + `ha_toyota` (HA custom integration) |
 | Tracking issues | [ha_toyota#87](https://github.com/pytoyoda/ha_toyota/issues/87), [#137](https://github.com/pytoyoda/ha_toyota/issues/137), [#157](https://github.com/pytoyoda/ha_toyota/issues/157), [#168](https://github.com/pytoyoda/ha_toyota/issues/168), [#190](https://github.com/pytoyoda/ha_toyota/issues/190), [#229](https://github.com/pytoyoda/ha_toyota/issues/229), [#281](https://github.com/pytoyoda/ha_toyota/issues/281), [#284](https://github.com/pytoyoda/ha_toyota/issues/284), [pytoyoda#161](https://github.com/pytoyoda/pytoyoda/issues/161) |
 | Status | Implemented, deployed live on a 2-vehicle account, validated on a real drive. **PRs not yet opened**, pending 24-48h soak. |
-| Fork branches | [`nledenyi/pytoyoda:rate-limit-resilience`](https://github.com/nledenyi/pytoyoda/tree/rate-limit-resilience) (head `2dc2f81`), [`nledenyi/ha_toyota:rate-limit-resilience`](https://github.com/nledenyi/ha_toyota/tree/rate-limit-resilience) (head `ebbd4b5`) |
+| Fork branches | [`nledenyi/pytoyoda:rate-limit-resilience`](https://github.com/nledenyi/pytoyoda/tree/rate-limit-resilience) (head `19747ea`, single squashed feat commit), [`nledenyi/ha_toyota:rate-limit-resilience`](https://github.com/nledenyi/ha_toyota/tree/rate-limit-resilience) (head `14d0623`, single squashed feat commit) |
 | Public engagement | [Gist with root-cause analysis](https://gist.github.com/nledenyi/239ee99cfb171bc57a5027bb270a322a), [comment on #281](https://github.com/pytoyoda/ha_toyota/issues/281#issuecomment-4316677107), [comment on #284](https://github.com/pytoyoda/ha_toyota/issues/284#issuecomment-4316675909) |
 
 ## Symptoms
@@ -151,7 +151,7 @@ made earlier in the investigation:
 
 ## Design refinements after observing the strategy live
 
-Two changes landed post-real-drive (commit `ebbd4b5`), both motivated
+Two changes landed post-real-drive (now in the squashed `14d0623`), both motivated
 by what we saw rather than what we'd planned:
 
 - **Cycle-count followup** instead of a 12-min wall-clock deadline.

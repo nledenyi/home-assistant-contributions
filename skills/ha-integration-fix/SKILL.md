@@ -42,6 +42,21 @@ downstream of schema drift.
 - If you decide to continue: copy `~/home-assistant/integrations/_template/`
   to `~/home-assistant/integrations/<name>/` and fill the README.
 
+### Read the actual code that produced historical negative results
+
+When prior PRs / issue comments report "we tried X and it didn't work,"
+do not trust the conclusion - read the request code that produced the
+negative result. Especially common: a feature gets concluded "unsupported"
+because someone called the endpoint with the wrong request shape (empty
+body, missing required header, wrong method). The conclusion then
+propagates across years of issue comments.
+
+Example pattern: an upstream PR submits a `POST /endpoint` with an empty
+body and gets a 500 response, concludes "endpoint unsupported," closes
+the PR. A later attempt with the documented body shape succeeds. If you
+find yourself agreeing with a previous "it does not work" verdict,
+spend 10 minutes inspecting the actual HTTP request before signing off.
+
 ### Common "symptom treatment" patterns to watch for
 
 Integrations frequently accumulate patches that silence a warning
@@ -166,6 +181,34 @@ contributing doc before pushing.
 - No em dashes in commit messages (replace with regular dash). No AI
   slop ("Let me...", "I'll now..."), no emoji.
 
+## Step 4a. For large feature deliveries: live deploy + real-world validation BEFORE the PR
+
+When the change is bigger than a single-bug fix - new endpoints, new
+strategy logic, new entities, options-flow additions - the linear
+"fork → patch → test → PR" sequence underfits. Add an iteration loop:
+
+1. **TDD a pure-function core** for any decision logic (state machine
+   / strategy / scheduler). Keep it side-effect-free so unit tests
+   exercise every branch without booting HA.
+2. **Mock-API harness** that simulates the upstream API contract.
+   Tests against the mock can run thousands of cycles in seconds; the
+   real API stays on the integration's natural cadence floor.
+3. **Live deploy on your own HA**, even before the PR. Several classes
+   of bug only surface in a live coordinator: device objects recreated
+   per cycle wiping per-call state, cycle-vs-cache age interaction,
+   options-flow string-vs-list type bugs, translation cache lag.
+4. **Real-world trigger validation**. If the strategy reacts to
+   physical events (driving, parking, locking), validate by actually
+   doing those things and checking the integration's response.
+   Synthesise as much as you can in tests, but at least one real-world
+   pass before the PR earns reviewer trust.
+5. **Iterate freely with separate commits during the live phase**.
+   You will discover bugs on day one of soak. Land each fix as its
+   own commit so the rollback story stays clean. Squash before PR
+   (Step 7b).
+
+Skip this entire sub-section for single-line bug fixes; it's overkill.
+
 ## Step 4b. For perf/leak bugs: before-and-after measurement
 
 If the bug is about memory, CPU, or request-rate rather than a
@@ -226,6 +269,17 @@ sudo qm guest exec <ha-vm-id> -- docker exec homeassistant pip install \
 
 `--no-deps` is critical. See LESSONS.md.
 
+**Critical gotcha after pip install**: `pip install --force-reinstall`
+updates files on disk but does NOT reload modules already imported into
+the running HA Core process. If your custom integration holds a
+reference to a class from the upgraded package
+(`from pkg.x import Foo`), it keeps calling the OLD `Foo` even after
+`ha core restart`. Symptom: new method signatures raise `TypeError:
+unexpected kwarg`, OR (worse) the old behaviour runs silently and your
+fix appears to do nothing. **Full VM reboot** (`qm reboot <ha-vm-id>`)
+is the reliable fix when upgrading a Python dep that's already imported
+- HA Core restart alone is not enough.
+
 Restart HA: `ha-mcp ha_restart(confirm=True)`. Wait for
 `curl -sf http://<ha-host>:8123/manifest.json` to return 200.
 Pace restarts - more than 3 in rapid succession kills the VM guest
@@ -246,6 +300,72 @@ time-dependent state (e.g. midnight reset), monitor through it with the
 4. Title in Conventional Commits. Reference the integration-repo issue
    as `<org>/<integration-repo>#<num>` (cross-repo syntax). You cannot
    auto-close cross-repo issues with keywords.
+
+## Step 7b. Pre-PR cleanup pass (iterative-feature work only)
+
+Skip if your branch is already a single clean commit; this section is
+for branches that grew through live deploy and iteration.
+
+### Audit your prose for evidence backing
+
+Read every claim in the README, options-flow descriptions, commit
+messages, PR body. For each one, ask: **do I have direct evidence for
+this, or am I generalising from a hypothesis?** Replace speculative
+language with hedged language:
+
+- "always returns X unless Y" → "frequently returns X, often
+  uncorrelated with Y"
+- "this fixes the issue" → "this aims to address the issue"
+- "the modem stays responsive briefly after parking" (speculation) →
+  "captures state the user changes shortly after stopping" (observed)
+
+A reviewer will catch overclaims faster than an underclaim, and an
+overclaim that gets contradicted in a comment hurts the PR's
+credibility.
+
+### Options-flow / UX rendering review with the user
+
+If the PR adds or changes config options, sit with the user looking at
+the rendered HA options form (Settings → Devices & Services →
+&lt;Integration&gt; → Configure). Catch:
+
+- Field ordering: most fundamental cadence knob first
+- Labels: ambiguous ("Refresh cache if older") → scoped ("Refresh
+  status cache if older")
+- Descriptions: scope ("only the /v1/global/remote/status endpoint
+  covers door/window/lock/hood; other data is fetched every cycle
+  regardless"), dependencies ("when this option is OFF, the four
+  options below have no effect"), evidence-backed rationale
+- Conditional fields: collapse "boolean toggle + sub-interval" into a
+  single field where 0 = disabled. HA's options-flow has no clean
+  toggle-with-sub-field widget; the dependency only lives in the
+  description.
+- Translation cache lag: HA caches options-form translations at
+  startup. After updating en.json, restart HA Core and re-open the
+  form to confirm the new labels render.
+
+### Commit squash with --force-with-lease
+
+Iterative live-deploy work creates many small "found a bug at runtime"
+commits. Reviewers want the polished feature, not the discovery story.
+Squash before opening the PR:
+
+```bash
+git fetch origin <branch>                       # refresh local origin/ ref
+git reset --soft <base-of-feature>              # keep all diffs staged
+git commit -m "<final feature commit message>"  # write the polished version
+git push --force-with-lease="<branch>:<sha>" origin <branch>
+```
+
+`--force-with-lease=<branch>:<sha>` is safer than `--force`: rejects
+the push if origin moved since you last fetched. Important if anyone
+else might have pushed; cheap insurance even when no one else is
+contributing. Plain `--force` is fine if you're certain you're the
+only contributor.
+
+If the squash drops uncommitted-but-intended changes (working-tree
+edits made between the last commit and the soft-reset), `git status`
+will show them. Re-stage and `git commit --amend` before pushing.
 
 ## Step 8. Comment on the integration issue
 
