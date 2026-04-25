@@ -275,3 +275,201 @@ If you're iterating on `config_flow.py`, the disable/enable cycle runs
 `async_setup_entry` again but the config_flow module is already cached in
 Python. You need a full `ha core restart` to bust the cache. Symptom: you
 edit the schema, click Configure, still see the old form.
+
+### ANY module under `custom_components/<name>/` is cached across reloads
+
+Generalisation of the config_flow case: Python's import cache
+(`sys.modules`) holds every imported module for the process lifetime.
+`config_entries.async_reload(entry_id)` calls `async_unload_entry` then
+`async_setup_entry` from the ALREADY-IMPORTED module. It does not
+reimport. So edits to `__init__.py`, `sensor.py`, `entity.py`,
+`config_flow.py`, etc. all require a full `ha core restart`.
+
+Symptom to watch for when this bites mid-iteration: the sensor-level
+behaviour of a change lands correctly (because sensor.py has been
+reimported by the reload path you expected), but the coordinator-level
+behaviour silently runs the old code. You see half a fix work and half
+not, and can't explain why. Restart HA and try again.
+
+Mitigation: keep a restart in your mental deploy loop for any edit
+outside of YAML configuration. When pair-debugging with an in-container
+edit via `docker cp`, prefer `ha core restart` over `reload config entry`
+unless you've confirmed the specific file you edited isn't module-cached.
+
+### Persist coordinator state in `hass.data` to survive options-flow reloads
+
+If `async_setup_entry` creates a closure with state you want preserved
+across reloads (e.g. a per-VIN cache, per-entity diagnostic dict, the
+"last good" snapshot for a retain-on-transient feature), putting it in
+local variables inside `async_setup_entry` means the state is wiped
+every time the user toggles an option in the UI. The options-flow
+handler calls `async_reload` which re-enters `async_setup_entry` with
+a fresh closure.
+
+Put it in `hass.data[DOMAIN][f"{entry.entry_id}_aux"]` (any key other
+than `entry.entry_id` itself, which gets popped by `async_unload_entry`).
+The new closure re-discovers the dict via `setdefault`.
+
+Failure mode before this fix: user toggles retain on/off during a
+rate-limit-penalty window → reload clears cache → first refresh after
+reload has nothing to serve and nothing to retry from → integration
+stuck in `setup_retry` loop until the remote API cools off. With
+`hass.data` persistence, the cache survives and first refresh can
+continue serving from it.
+
+### Per-vehicle fault isolation pattern for multi-device coordinators
+
+When a `DataUpdateCoordinator`'s update method fetches N devices in a
+loop and one fails, the natural `raise UpdateFailed` propagates to ALL
+of N's entities being flipped `unavailable`. Fine if the devices are
+truly coupled (same connection) but wrong when each device is
+independently reachable (two different vehicles on an account, two
+plugs on the same cloud API).
+
+Pattern:
+1. Loop over the N devices with a per-device try/except.
+2. On success: append fresh `VehicleData(...)`.
+3. On failure: append a STUB `VehicleData(data=<device_obj>,
+   last_successful_fetch=None, last_error_code=<code>, ...)`. Stub keeps
+   the index-to-device mapping stable across the refresh.
+4. Override `ToyotaBaseEntity.available` to return False when
+   `vd["last_successful_fetch"] is None and not vd["is_cached"]` - the
+   stub test. Data sensors for the failed device render unavailable;
+   sensors for the successful device stay fresh.
+5. Diagnostic sensors (last_error, last_success, last_code) override
+   `available` back to True - those MUST stay visible exactly when
+   their device fails, to explain why.
+6. After the loop, if NO device has fresh data AND NO cache exists
+   anywhere, THEN raise `UpdateFailed` - that matches upstream "all
+   unavailable when entire fleet is down" behaviour for the truly
+   total-failure case.
+
+Critical trap: if you don't append a stub for failed devices, the list
+shrinks. Sensors initialised with `vehicle_index = N` then read
+`coordinator.data[N]` and either `IndexError` or read a DIFFERENT
+device's data at that shifted index. The symptom is "aygo's odometer
+suddenly shows rav4's value" - a hard bug to track down.
+
+### Commit-semantics for per-device state written mid-refresh
+
+If the refresh function updates a shared state dict before knowing
+whether the whole refresh will succeed, and then raises UpdateFailed
+later in the loop, the state writes are observable but the corresponding
+data never lands in `coordinator.data`. User sees incoherent combinations
+like "entity unavailable AND last successful fetch 3 minutes ago."
+
+Fix: only write to shared state at the END of the refresh function,
+after you know the refresh is committing. Use local variables or a
+temporary list during the loop, then merge to shared state once you
+pass the last raise point. Treat the shared state with the same commit
+semantics as `coordinator.data`: both updated iff the whole refresh
+succeeds.
+
+### Coordinator-recreated objects need an explicit cache layer
+
+`DataUpdateCoordinator` with a refresh function that calls
+`client.get_vehicles()` (or any equivalent fetch-by-list pattern) gets
+**fresh device objects on every cycle**. If the device class holds
+internal state populated by per-endpoint `update()` calls
+(`_endpoint_data` dict in pytoyoda's case), that state is wiped between
+cycles. A "skip this endpoint, serve cached" branch in your refresh
+logic then has nothing to serve - downstream sensors flip to `unknown`.
+
+Fix: cache the parsed response in `hass.data[DOMAIN][...]_diag` keyed
+by VIN, and re-inject into the new device object's `_endpoint_data`
+on cycles where you decide to skip the fetch. Symptom (lock sensors
+flipping to `unknown` between Toyota fetches) wasted ~30 minutes of
+debugging before the obvious "Vehicle is fresh per cycle" insight
+clicked.
+
+### `pip install --force-reinstall` while HA Core is running doesn't reload imported modules
+
+If you `docker exec homeassistant pip install --force-reinstall <pkg>`
+while HA Core is running, the package files on disk are updated but
+**any module already imported into the running Python process keeps
+the old code**. Custom integrations holding references to classes
+from the upgraded package (e.g. `from pkg.x import Foo`) will continue
+calling the old `Foo`, even if you restart HA Core afterwards (because
+HA Core in HAOS is a long-lived Python process, not a fresh container
+boot).
+
+Symptom: new methods raise `TypeError: unexpected kwarg`, OR (worse)
+the old method runs silently and your changes have no observable
+effect. Spent ~25 minutes on this before realising.
+
+Fix: full container/VM reboot after upgrading a Python dep that's
+already imported. `qm reboot <vmid>` or `Settings → System → Restart →
+Restart Host`. HA Core restart alone is NOT enough.
+
+### Service handler `device_id` arrives as a string OR a list
+
+When a service is registered with a target spec like
+`target: device: integration: toyota`, HA calls the handler with
+`call.data["device_id"]` as a **list** of device IDs. But when a
+service is invoked from code with `data={"device_id": "<id>"}`, the
+handler gets a **bare string**. `list(string)` iterates characters,
+not "single-item list" - which is a silent bug if your handler does
+`device_ids = list(call.data.get("device_id") or [])` and your button
+entity passes a string.
+
+Fix: defensive normalization in the handler:
+
+```python
+raw = call.data.get("device_id") or []
+device_ids = [raw] if isinstance(raw, str) else list(raw)
+```
+
+And on the call side, prefer passing a list:
+`{"device_id": [device.id]}` rather than `{"device_id": device.id}`.
+
+### Cycle-count beats wall-clock for recurring schedule logic
+
+Initial design used a `next_due_at = now + timedelta(minutes=12)`
+deadline to schedule a follow-up event. Brittle when the polling
+interval changed: with 6-min polling the followup fired at the second
+cycle after the trigger; with 60-min polling it fired at the next
+cycle (well past the deadline) - inconsistent.
+
+Switched to a counter: `remaining_cycles = N - 1`, decrement on each
+cycle that fires. Always exactly N cycles regardless of interval. The
+wall-clock spacing varies with polling, but that turned out to be
+fine - the original 12-min figure was a guess, not a hard requirement.
+
+General principle: when you find yourself reasoning about
+"approximately N cycles into the future," prefer a counter over a
+deadline. Counters compose with variable polling intervals and avoid
+deadline-vs-interval-skew bugs.
+
+### Don't refresh static-during-X data on every X cycle
+
+Original integration design refreshed `/v1/global/remote/status` (lock
+/ door / window state) every coordinator cycle, including during a
+drive. But that data is essentially static during a drive - locked,
+windows up, hood closed. The data that DOES change while driving
+(odometer, fuel, location) lives on different endpoints which are
+already fetched. So the per-cycle `/status` GET while driving is
+~40 useless calls on a 4-hour drive at 6-min polling, each one a
+chance for a transient 429.
+
+Same pattern recurs: be deliberate about which endpoints to poll
+under which device states. A blanket "fetch everything every cycle"
+is comfortable but wasteful and amplifies upstream API failures.
+
+### Trust the user's polling config; resist hidden time-bound heuristics
+
+After observing that "just_stopped" detection fires later under
+coarse polling (up to one cycle late), the temptation arose to
+time-bound the trigger - "skip the wake POST if the detected stop
+is older than 15 minutes." Considered and rejected.
+
+Reasoning: the user's polling interval IS their aggressiveness knob.
+If they set 1h polling, they're explicitly accepting "late detection."
+A hidden time-bound heuristic on top creates implicit behavior that
+doesn't appear anywhere in their config - harder to reason about,
+harder to debug, reduces user agency.
+
+When there's a config knob that already covers the use case, expose
+related knobs (in this case `post_count_per_stop` so coarse-polling
+users can opt for a single POST) and trust the user's combination,
+rather than overriding it with internal heuristics. The user's
+mental model stays clean: "I set N-min polling, I get N-min cadence."
