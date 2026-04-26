@@ -11,6 +11,12 @@ Public portfolio of Home Assistant-adjacent work: integration bug fixes, dashboa
 | ha_toyota (`_run_pytoyoda_sync` memory leak, ~500 KB per pytoyoda call) | PR open, reporter confirmed | [pytoyoda/ha_toyota#283](https://github.com/pytoyoda/ha_toyota/pull/283), [ha_toyota#282](https://github.com/pytoyoda/ha_toyota/issues/282) | [`integrations/pytoyoda/memory-leak-fix.md`](integrations/pytoyoda/memory-leak-fix.md) |
 | pytoyoda + ha_toyota (smart status refresh + cache-expiry mitigation + #87 null-render fix) | Implemented, deployed live, validated on real drive; PRs not yet open (soaking) | 9 issues across both repos: [#87](https://github.com/pytoyoda/ha_toyota/issues/87), [#137](https://github.com/pytoyoda/ha_toyota/issues/137), [#157](https://github.com/pytoyoda/ha_toyota/issues/157), [#168](https://github.com/pytoyoda/ha_toyota/issues/168), [#190](https://github.com/pytoyoda/ha_toyota/issues/190), [#229](https://github.com/pytoyoda/ha_toyota/issues/229), [#281](https://github.com/pytoyoda/ha_toyota/issues/281), [#284](https://github.com/pytoyoda/ha_toyota/issues/284), [pytoyoda#161](https://github.com/pytoyoda/pytoyoda/issues/161) | [`integrations/pytoyoda/smart-status-refresh.md`](integrations/pytoyoda/smart-status-refresh.md) |
 
+## Device writeups
+
+| Device | Writeup | Summary |
+|---|---|---|
+| Viessmann Vitodens 100-W B1HG | [Gist](https://gist.github.com/nledenyi/78c081370cf557229b59ad27fff0b0fe) | Local OpenTherm control via ESP32 + ESPHome, bypassing the Viessmann cloud paywall. Wiring, OT message map, and HA climate entity setup. |
+
 ## Dashboards
 
 | Pattern | Skill | Lives in |

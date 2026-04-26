@@ -550,6 +550,30 @@ For heroes with a `state_color: true` main entity, override the main icon's colo
 
 Note: always use `?.state` (optional chaining) and a default fallback via `|| 0` for numeric cases - see "Common pitfalls" section above.
 
+### State-reactive sub-button icon (open/closed swap)
+
+Bubble-card sub-button `icon:` strings are NOT evaluated as JS templates - a literal template expression ends up as the icon name and silently renders nothing. The working pattern: set a static fallback icon (the "safe" state) so something always renders, then swap via the `--card-mod-icon` CSS variable from the `styles:` block, which IS template-parsed.
+
+```yaml
+sub_button:
+  - entity: binary_sensor.windows_group
+    icon: mdi:window-closed-variant   # static fallback = safe state
+    # ...
+styles: |
+  .bubble-sub-button-1 {
+    --card-mod-icon: ${hass.states['binary_sensor.windows_group']?.state === 'on'
+      ? 'mdi:window-open-variant'
+      : 'mdi:window-closed-variant'};
+  }
+  .bubble-sub-button-1 ha-icon {
+    color: ${hass.states['binary_sensor.windows_group']?.state === 'on' ? '#f44336' : '#4caf50'} !important;
+  }
+```
+
+Same trick works for door / lock / any binary state. Pair with the color rule on the same selector for a full red-open / green-closed effect. Mind the lock device_class polarity (see "HA semantics gotchas" below) - the template's `=== 'on'` branch must match what you actually consider "alarm" for that entity.
+
+Fallbacks if `--card-mod-icon` doesn't take effect (older card_mod): `custom:button-card`, or template `binary_sensor`s with `icon_template` exposing the icon as state.
+
 ### State-attribute-derived tile (when HA tile doesn't show the unit)
 
 For utility_meter or similar entities where you want to display the `last_period` attribute as a tile but need the unit suffix (e.g. `kWh`), do NOT rely on the `state_content: [last_period]` + CSS `::after { content: ' kWh' }` trick - HA's tile shadow DOM changes across versions and the `::after` often doesn't land. Instead, create a template sensor that exposes the attribute as its own state with the proper unit, then point the tile at the template sensor:
@@ -681,6 +705,21 @@ These are all silent failures - the styles look correct in the config but don't 
    - Playwright: `document.querySelector('home-assistant').hass.states['entity.id']` - does the entity exist?
    - Walk the bubble-card's shadow DOM and find all `<style>` elements. The `styles:` config value should appear in one of them. If it's empty or missing text you wrote, the parser dropped it.
    - Diff against a bubble-card that IS working (e.g. the Vitodens one) - usually the difference is one of pitfalls 1-3 above.
+
+## HA semantics gotchas
+
+These are HA-platform behaviours, not card bugs - but they show up as visibly wrong icons/colors on cards aggregating these entities.
+
+### Lock binary_sensor polarity is inverted
+
+HA models `lock` binary_sensors as problem-class: `on = unlocked` (problem present), `off = locked` (safe). This bites whenever you aggregate locks into a binary_sensor group:
+
+- A group with `all_on: true` over locks means "all UNLOCKED", not "all locked".
+- A `state === 'on'` template colors / icon-swaps red when locked - the OPPOSITE of intent.
+
+**Convention to apply consistently on this skill's cards:** group state `on` = alarm (red + open icon), `off` = safe (green + closed icon). For locks, use `all_on: false` so group `on` = "any unlocked" = the alarm state, matching doors/windows.
+
+This same inversion will bite anywhere downstream (automations, badges, other dashboards) that consumes these groups - keep it in mind when wiring entities, not just cards.
 
 ## Don'ts
 
