@@ -104,17 +104,40 @@ vehicles = await asyncio.wait_for(client.get_vehicles(), 15)
 
 The login path's `_sync_login` helper is removed analogously. `MyT(...)` construction is moved out of `hass.async_add_executor_job` (the constructor does no I/O, only stores fields).
 
-## Known limitation - and the follow-up plan
+## Residual leak found after #283 - "Memory leak fix #2"
 
-My fix removes the event-loop churn, which removes the leak. It does **not** address the underlying blocking call that motivated the original wrapper. HA's watchdog will log `load_verify_locations` warnings when pytoyoda's httpx clients are first constructed during setup and during subsequent refreshes.
+After #283 was approved, a few users (arhimidis64, Caros2017, mario-pranjic) reported that RSS still ramped on their installs. I could not reproduce on my own HA, so the diagnosis required environment-specific data: arhimidis64 captured a 30-min memray flamegraph using the [memray-on-haos guide](../../references/memray-on-haos.md) and shared it.
 
-Two separate, coordinated changes would eliminate both problems permanently:
+The flamegraph pointed at a different mechanism, one layer deeper than #283's wrapper:
 
-1. **Shared `httpx.AsyncClient`** (spans `pytoyoda` + `ha_toyota`). Teach pytoyoda's `MyT` / `Controller` to accept an externally-supplied `httpx.AsyncClient`. In ha_toyota, pass `homeassistant.helpers.httpx_client.get_async_client(hass)` at setup. One client, one SSL context, reused for the lifetime of the config entry. No blocking call after setup, HTTP keep-alive reuses TCP connections, and plausibly reduces Toyota's 429 rate-limit triggers because we stop opening fresh TLS sessions per request.
+- **78.7 MB allocated** under pytoyoda's `Vehicle.update().parallel_wrapper` in the trace
+- **169,552 SSL contexts created** over the 30-min window, one per HTTP request
+- Frame chain inside `request_raw`: `httpx.AsyncClient.__init__` -> `_init_transport` -> `HTTPTransport.__init__` -> `create_ssl_context`
 
-2. **Retry policy with backoff in pytoyoda**. Currently a 429 propagates immediately to HA as `UpdateFailed` and sensors go `unavailable` for one refresh cycle. Exponential backoff with `Retry-After` support inside pytoyoda would let the client self-heal transient rate limits without disturbing HA.
+Reading `pytoyoda/controller.py:361` directly confirmed the source:
 
-Both are out of scope for the memory-leak PR - they touch different concerns and deserve their own review loops. The leak is the immediate user-visible pain point; everything else can land after.
+```python
+async with httpx.AsyncClient(timeout=self._timeout) as client:
+    response = await client.request(...)
+```
+
+Every endpoint call constructs a fresh `httpx.AsyncClient` inside `async with`. Each construction allocates a new OpenSSL `SSL_CTX` (~1 MB+), and Python's OpenSSL bindings don't fully release these to the C heap until generational GC catches up. That's a slow-ramp leak that #283 didn't touch because it happens inside pytoyoda, not inside the `_run_pytoyoda_sync` wrapper.
+
+The fix was already drafted as the "shared httpx.AsyncClient" follow-up below: a persistent `Controller._client` reused across requests. Now landed on the `rate-limit-resilience` branch and bundled into [pytoyoda#252](https://github.com/pytoyoda/pytoyoda/pull/252) (commit `78c17b3`). Side effect: the same change also reduces TLS handshake count from one-per-request to one-per-process-lifetime, which is genuinely net-positive even setting the leak aside.
+
+Install instructions for testers in the [v2 install gist](https://gist.github.com/nledenyi/772fd3d68a445313fec56fae430b8f01).
+
+## Original known limitation - and the follow-up plan (now closed)
+
+My #283 fix removes the event-loop churn, which removes the wrapper-driven leak. It did **not** address the underlying blocking call that motivated the original wrapper, nor the per-request httpx client construction. HA's watchdog will still log `load_verify_locations` warnings when pytoyoda's httpx clients are first constructed during setup and during subsequent refreshes.
+
+Two separate, coordinated changes would eliminate the remaining problems permanently. Both are now part of the [pytoyoda#252](https://github.com/pytoyoda/pytoyoda/pull/252) PR rather than separate follow-ups:
+
+1. ✅ **Shared `httpx.AsyncClient`** (spans `pytoyoda` only - the integration doesn't need to inject one). pytoyoda's `Controller` now lazy-initialises a single `self._client` and reuses it for every request. One client, one SSL context, reused for the lifetime of the controller. No more per-request construction. **This is also the residual-leak fix above.**
+
+2. ✅ **Retry policy with backoff in pytoyoda**. Now `(2, 4, 8)s` exponential backoff on 429 / 5xx in `controller.request_raw`, up to 3 retries (4 attempts total, ~14s worst-case wall time before giving up). 4xx client errors other than 429 still fail fast.
+
+Both shipped together in #252's commits `78c17b3` and `88b3774` respectively.
 
 ## Cross-links
 

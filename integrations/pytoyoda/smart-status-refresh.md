@@ -10,9 +10,9 @@ and [memory leak](memory-leak-fix.md)).
 |---|---|
 | Component | `pytoyoda` (Python client) + `ha_toyota` (HA custom integration) |
 | Tracking issues | [ha_toyota#87](https://github.com/pytoyoda/ha_toyota/issues/87), [#137](https://github.com/pytoyoda/ha_toyota/issues/137), [#157](https://github.com/pytoyoda/ha_toyota/issues/157), [#168](https://github.com/pytoyoda/ha_toyota/issues/168), [#190](https://github.com/pytoyoda/ha_toyota/issues/190), [#229](https://github.com/pytoyoda/ha_toyota/issues/229), [#281](https://github.com/pytoyoda/ha_toyota/issues/281), [#284](https://github.com/pytoyoda/ha_toyota/issues/284), [pytoyoda#161](https://github.com/pytoyoda/pytoyoda/issues/161) |
-| Status | Implemented, deployed live on a 2-vehicle account, validated on a real drive. **PRs not yet opened**, pending 24-48h soak. |
-| Fork branches | [`nledenyi/pytoyoda:rate-limit-resilience`](https://github.com/nledenyi/pytoyoda/tree/rate-limit-resilience) (head `19747ea`, single squashed feat commit), [`nledenyi/ha_toyota:rate-limit-resilience`](https://github.com/nledenyi/ha_toyota/tree/rate-limit-resilience) (head `14d0623`, single squashed feat commit) |
-| Public engagement | [Gist with root-cause analysis](https://gist.github.com/nledenyi/239ee99cfb171bc57a5027bb270a322a), [comment on #281](https://github.com/pytoyoda/ha_toyota/issues/281#issuecomment-4316677107), [comment on #284](https://github.com/pytoyoda/ha_toyota/issues/284#issuecomment-4316675909) |
+| Status | **PRs open as of 2026-04-26**: [pytoyoda#252](https://github.com/pytoyoda/pytoyoda/pull/252) + [ha_toyota#286](https://github.com/pytoyoda/ha_toyota/pull/286), both ready-for-review. Implemented, deployed live on a 2-vehicle account, validated on a real drive, soaking clean. |
+| Fork branches | [`nledenyi/pytoyoda:rate-limit-resilience`](https://github.com/nledenyi/pytoyoda/tree/rate-limit-resilience) (head `2b4a1d4`, logical-commit chain, lint-clean and pytest-green), [`nledenyi/ha_toyota:rate-limit-resilience`](https://github.com/nledenyi/ha_toyota/tree/rate-limit-resilience) (head `55c96c3` post-Gemini-fix, logical-commit chain) |
+| Public engagement | **Install gist v2** [772fd3d68a445313fec56fae430b8f01](https://gist.github.com/nledenyi/772fd3d68a445313fec56fae430b8f01) (2026-04-27), older root-cause gist [239ee99cfb171bc57a5027bb270a322a](https://gist.github.com/nledenyi/239ee99cfb171bc57a5027bb270a322a) (2026-04-25), and 2026-04-27 follow-up comments on [#281](https://github.com/pytoyoda/ha_toyota/issues/281#issuecomment-4323214244), [#282](https://github.com/pytoyoda/ha_toyota/issues/282#issuecomment-4323217406), [#284](https://github.com/pytoyoda/ha_toyota/issues/284#issuecomment-4323219409), [#278](https://github.com/pytoyoda/ha_toyota/issues/278#issuecomment-4323222323) plus the earlier first-analysis comments on [#281](https://github.com/pytoyoda/ha_toyota/issues/281#issuecomment-4316677107) and [#284](https://github.com/pytoyoda/ha_toyota/issues/284#issuecomment-4316675909) |
 
 ## Symptoms
 
@@ -151,7 +151,7 @@ made earlier in the investigation:
 
 ## Design refinements after observing the strategy live
 
-Two changes landed post-real-drive (now in the squashed `14d0623`), both motivated
+Two changes landed post-real-drive (now in `d3c3e12`), both motivated
 by what we saw rather than what we'd planned:
 
 - **Cycle-count followup** instead of a 12-min wall-clock deadline.
