@@ -12,17 +12,17 @@ Python client (e.g. `ha_toyota` -> `pytoyoda`, `Mammotion-HA` ->
 `pymammotion`). The PR almost always goes to the client repo. The issue
 usually lives on the integration repo. Keep that asymmetry in mind.
 
-See `~/home-assistant/LESSONS.md` for gotchas. See
-`~/home-assistant/integrations/_template/` for the folder
+See `/home/claude/home-assistant/LESSONS.md` for gotchas. See
+`/home/claude/home-assistant/integrations/_template/` for the folder
 structure to bootstrap.
 
 ## Step 0. Orient
 
 1. Confirm the user's actual goal (reported bug vs something else).
-2. Find the integration in `~/home-assistant/references/hacs-installed.md`
+2. Find the integration in `/home/claude/home-assistant/references/hacs-installed.md`
    to get the repo names and client package name.
 3. Check if there is already a folder at
-   `~/home-assistant/integrations/<name>/`. If yes, read its README and
+   `/home/claude/home-assistant/integrations/<name>/`. If yes, read its README and
    `notes.md` first - this may be a continuation, not a new fix.
 
 ## Step 1. Research before coding
@@ -39,8 +39,8 @@ downstream of schema drift.
 - Search the client repo's open PRs for the same area.
 - Check when the maintainer last committed. If very recent, file an
   issue with your diagnosis instead of a PR. Let them move first.
-- If you decide to continue: copy `~/home-assistant/integrations/_template/`
-  to `~/home-assistant/integrations/<name>/` and fill the README.
+- If you decide to continue: copy `/home/claude/home-assistant/integrations/_template/`
+  to `/home/claude/home-assistant/integrations/<name>/` and fill the README.
 
 ### Read the actual code that produced historical negative results
 
@@ -141,7 +141,7 @@ next fix in the same repo doesn't require re-discovery.
 ## Step 2. Reproduce locally
 
 - Find the credentials for the integration:
-  `sudo qm guest exec <ha-vm-id> -- docker exec homeassistant python3 -c
+  `sudo qm guest exec 101 -- docker exec homeassistant python3 -c
   "import json;print([e for e in
   json.load(open('/config/.storage/core.config_entries'))['data']['entries']
   if e['domain']=='<domain>'])"`
@@ -262,26 +262,75 @@ the single best signal the maintainer looks at during review.
 ## Step 6. Install the fork into HA and verify
 
 ```bash
-sudo qm guest exec <ha-vm-id> -- docker exec homeassistant pip install \
+sudo qm guest exec 101 -- docker exec homeassistant pip install \
   --force-reinstall --no-deps \
   "git+https://github.com/nledenyi/<package>@bug/<short-desc>"
 ```
 
-`--no-deps` is critical. See LESSONS.md.
+`--no-deps` is critical to avoid upgrading other HA-pinned packages
+(httpx, pydantic, pyjwt). See LESSONS.md.
+
+**Caveat: `--no-deps` skips legitimately-new transitive deps** that
+the fork might have added since the last release. Symptom: after
+install, `ModuleNotFoundError: No module named '<dep>'` on first
+import. Example from 2026-04-27: pytoyoda 5.1.0 added `hishel` as a
+new dep that 5.0.0 didn't have; upgrades with `--no-deps` left HA
+without it.
+
+The fix is to list the new dep explicitly alongside:
+
+```bash
+pip install --force-reinstall --no-deps \
+  "git+https://github.com/nledenyi/<package>@<branch>" \
+  "<new-transitive-dep>>=<version>"
+```
+
+To detect this proactively before users hit it, diff the fork's
+`pyproject.toml` requirements against the last released version's
+on PyPI - any addition in the fork's list needs to be installed
+explicitly in the gist instructions.
 
 **Critical gotcha after pip install**: `pip install --force-reinstall`
 updates files on disk but does NOT reload modules already imported into
 the running HA Core process. If your custom integration holds a
 reference to a class from the upgraded package
-(`from pkg.x import Foo`), it keeps calling the OLD `Foo` even after
-`ha core restart`. Symptom: new method signatures raise `TypeError:
-unexpected kwarg`, OR (worse) the old behaviour runs silently and your
-fix appears to do nothing. **Full VM reboot** (`qm reboot <ha-vm-id>`)
-is the reliable fix when upgrading a Python dep that's already imported
-- HA Core restart alone is not enough.
+(`from pkg.x import Foo`), it keeps calling the OLD `Foo`. Symptom:
+new method signatures raise `TypeError: unexpected kwarg`, OR (worse)
+the old behaviour runs silently and your fix appears to do nothing.
+
+`ha core restart` (via `mcp__ha__ha_restart(confirm=True)`) is usually
+enough - it restarts the Python process and busts `sys.modules`.
+`config_entries.reload` is NOT enough - it re-runs
+`async_setup_entry` against the still-cached modules.
+
+If `ha core restart` does NOT pick up your fix:
+
+1. **Verify the install actually landed where HA imports from.**
+   `pip show <pkg>` reports the *Location* path, but that may be
+   user-site (`/home/homeassistant/.local/lib/python3.14/site-packages`)
+   which is not on HA's import path. Confirm by importing inside the
+   container:
+
+   ```sh
+   docker exec homeassistant python3 -c "import pkg, pkg.module; print(pkg.__file__)"
+   ```
+
+   If the path is user-site or differs from your expected install
+   location, re-install with elevated perms or `--target` aimed at
+   HA's actual site-packages:
+
+   ```sh
+   docker exec -u 0 homeassistant pip install --force-reinstall --no-deps \
+     "git+https://github.com/<fork>@<branch>"
+   ```
+
+2. **Escalate to a VM reboot only if (1) checks out and the symptom
+   persists.** `qm reboot 101` is reliable but heavy; almost never
+   needed in practice for a Python dep swap. Reaches for it when the
+   venv is in a weird half-state from prior failed installs.
 
 Restart HA: `ha-mcp ha_restart(confirm=True)`. Wait for
-`curl -sf http://<ha-host>:8123/manifest.json` to return 200.
+`curl -sf http://192.168.1.58:8123/manifest.json` to return 200.
 Pace restarts - more than 3 in rapid succession kills the VM guest
 agent.
 
@@ -293,13 +342,50 @@ time-dependent state (e.g. midnight reset), monitor through it with the
 
 1. Force-push the cleaned branch to your fork.
 2. Draft the PR body in a file under
-   `~/home-assistant/integrations/<name>/PR-body.md`. Show it to the
+   `/home/claude/home-assistant/integrations/<name>/PR-body.md`. Show it to the
    user for review before posting.
 3. Use `gh pr create --body-file` (not `--body` inline) so markdown
    renders correctly.
 4. Title in Conventional Commits. Reference the integration-repo issue
    as `<org>/<integration-repo>#<num>` (cross-repo syntax). You cannot
    auto-close cross-repo issues with keywords.
+
+### Stacked PRs against an external upstream
+
+If your branch depends on another open PR (your own or someone else's)
+in the same upstream repo, the GitHub PR base ref can NOT point at the
+dependency's branch - it must point at the upstream's main branch
+because that's where the PR will eventually merge.
+
+The pattern is:
+
+1. Open the PR against upstream `main`.
+2. Include the dependency PR's commits inline at the bottom of your
+   branch (rebase / cherry-pick onto the dependency's tip locally,
+   then push). Reviewers see your commits PLUS the dependency's
+   commits in the diff. That's expected for a stacked PR awaiting
+   merge order.
+3. Once the dependency merges, rebase your branch onto fresh main:
+   the dependency's commits drop out of the diff automatically (they
+   exist in main now), and the PR diff narrows to just your
+   commits.
+4. Communicate the merge order in the PR description with a `> [!NOTE]`
+   block: "depends on #X, please merge after". Do NOT try to gate it
+   via the base ref - GitHub does not enforce that for cross-PR
+   dependencies in the same repo.
+
+Counter-example: don't literally rebase your feature branch onto
+the dependency's branch and expect GitHub to "stack" them. The PR's
+base ref stays at upstream main, so the diff balloons to include both
+PRs' commits with no signal to the reviewer that some of those commits
+are from the other PR. Confuses reviewers and looks like scope creep.
+
+If you accidentally rebase onto the dependency branch, revert with
+`git reset --hard <pre-rebase-sha>` and force-push.
+
+When the dependency PR is also yours and you can't keep two branches
+in sync without manual rebases, accept the rebases. They're cheap
+relative to the cost of an unreviewable diff.
 
 ## Step 7b. Pre-PR cleanup pass (iterative-feature work only)
 
@@ -343,6 +429,23 @@ the rendered HA options form (Settings → Devices & Services →
 - Translation cache lag: HA caches options-form translations at
   startup. After updating en.json, restart HA Core and re-open the
   form to confirm the new labels render.
+- **`selector.NumberSelector` returns `float`**, even with `step=1`
+  and `mode=BOX`. If your code uses the value for list slicing
+  (`existing[:max]`), `range(max)`, or anything `__index__`-sensitive,
+  it crashes with `TypeError: slice indices must be integers`. Coerce
+  to `int` at every read site:
+
+  ```python
+  max_recent_trips: int = int(
+      entry.options.get(CONF_MAX_RECENT_TRIPS, DEFAULT_MAX_RECENT_TRIPS)
+  )
+  ```
+
+  Multiple read sites = multiple casts. Don't try to defend deeper in
+  the integration; trust the type signature once it crosses the
+  boundary. `vol.All(selector.NumberSelector(...), vol.Coerce(int))`
+  in the schema is an alternative but easier to forget on
+  schema additions.
 
 ### Commit squash with --force-with-lease
 
@@ -370,7 +473,7 @@ will show them. Re-stage and `git commit --amend` before pushing.
 ## Step 8. Comment on the integration issue
 
 1. Draft the comment under
-   `~/home-assistant/integrations/<name>/<issue-slug>-comment.md`. Show
+   `/home/claude/home-assistant/integrations/<name>/<issue-slug>-comment.md`. Show
    to the user for review.
 2. Include: root cause summary, link to the upstream PR, install-the-
    fork workaround for affected users, offer to rework if maintainer
@@ -379,8 +482,8 @@ will show them. Re-stage and `git commit --amend` before pushing.
 
 ## Step 9. Update the catalogue
 
-1. Update `~/home-assistant/README.md` with a row for this fix.
-2. Update `~/home-assistant/integrations/<name>/README.md` with final PR
+1. Update `/home/claude/home-assistant/README.md` with a row for this fix.
+2. Update `/home/claude/home-assistant/integrations/<name>/README.md` with final PR
    links and status.
 3. If new cross-cutting lessons came up, append to `LESSONS.md`.
 
@@ -391,7 +494,7 @@ will show them. Re-stage and `git commit --amend` before pushing.
 - [ ] HA container running the forked branch, verified working end to
       end (not just the crash fix - the sensors actually show the data
       they're supposed to).
-- [ ] All artefacts under `~/home-assistant/integrations/<name>/`.
+- [ ] All artefacts under `/home/claude/home-assistant/integrations/<name>/`.
 - [ ] Catalogue updated.
 - [ ] No credentials committed (check probes for embedded usernames /
       passwords / tokens).
@@ -399,7 +502,7 @@ will show them. Re-stage and `git commit --amend` before pushing.
 ## Don'ts
 
 - Don't run `ha core restart` more than 2-3 times in rapid succession
-  (guest agent dies, needs `qm reset <ha-vm-id>`).
+  (guest agent dies, needs `qm reset 101`).
 - Don't commit with `--amend` if pre-commit fails mid-sequence; fix
   and create a new commit (standard Claude Code guidance, extra
   important here because HA rebuilds take minutes).

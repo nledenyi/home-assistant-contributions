@@ -236,6 +236,79 @@ Just file an issue if:
 - Maintainer is active (recent commits / responsive issues).
 - You cannot reliably reproduce.
 
+### Manifest pin coordination across the fork → upstream → release lifecycle
+
+When a feature requires changes in **both** layers (rare but real), the
+manifest pin in `<wrapper>/manifest.json:requirements` becomes the
+synchronisation point between the two PRs. Standard pattern:
+
+```json
+"requirements": ["pytoyoda>=5.1.0,<6.0", "arrow"]
+```
+
+Lifecycle:
+
+| Stage | Client repo | Wrapper repo | What testers do |
+|---|---|---|---|
+| Both PRs open | PR open against `main` | PR open against `main`, manifest pinned to current PyPI release | Need fork install for both halves |
+| Client PR merges | Merged into `main`; PyPI release not yet cut | Wrapper PR still uses `git+main` install for client side | Fork install for both halves |
+| Client release cut | New PyPI version (e.g. `X.Y+1.0`) tagged + uploaded | **Bump manifest pin to `>=X.Y+1.0`** in the wrapper PR | Fork install simplifies: client is now stock PyPI, only wrapper needs fork |
+| Wrapper PR merges | (already done) | New wrapper version on HACS | Stock everything; fork install obsolete |
+
+**Footgun: a client release that's incompatible with the stock
+wrapper.** If the client release contains a behavioural change that
+the stock wrapper can't tolerate (e.g. a persistent `httpx.AsyncClient`
+that the stock wrapper's per-call event-loop helper closes out from
+under), then **shipping the client release before merging the matching
+wrapper change creates a regression on auto-update**. Anyone whose HA
+satisfies the new client pin from PyPI but still runs the stock
+wrapper crashes at runtime.
+
+Mitigation, in priority order:
+
+1. **Coordinate the merges**: open the wrapper PR before cutting the
+   client release; prefer to merge the wrapper PR same-day or sooner.
+2. **If you can't coordinate**, the wrapper PR stays open and ready
+   while the client release sits on PyPI; surface the regression on
+   the integration's open issues so other users (and the maintainers)
+   see the urgency without being privately nudged.
+3. **Provide a fork-install gist** for users who hit the regression
+   and want a working install today. The pytoyoda half becomes "just
+   upgrade from PyPI"; only the wrapper half is the fork swap.
+
+Real example (2026-04-27): pytoyoda#252 (client) merged 11:47Z, released
+as v5.1.0 on PyPI 12:04Z. ha_toyota#283 (wrapper, removes the per-call
+event-loop helper) approved but not yet merged. pytoyoda 5.1.0's
+persistent httpx client + stock ha_toyota's wrapper = `RuntimeError:
+Event loop is closed` on the second cycle for any user who
+auto-updated. Fork install of ha_toyota was the workaround until #283
+merged.
+
+### `--no-deps` is the right safety flag, but it's a knife edge
+
+When installing a forked Python client into HA Core's pip env,
+`--no-deps` is the default safety choice: it stops pip from
+"upgrading" packages HA pins (`httpx`, `pydantic`, `pyjwt`, etc.) to
+versions that conflict with HA's other integrations.
+
+The flip side: if the **fork itself** added a new transitive dependency
+since the previous release, `--no-deps` skips it. Symptom on first
+import: `ModuleNotFoundError: No module named '<dep>'`. Real example:
+pytoyoda 5.1.0 added `hishel` as a new dep (cache layer for the
+persistent httpx client) that 5.0.0 didn't have; users upgrading with
+`--no-deps` ended up missing it.
+
+Fix is to list the new dep explicitly alongside the install:
+
+```bash
+pip install --upgrade --no-deps "<package>>=<new-version>" "<new-dep>>=<version>"
+```
+
+To detect proactively, diff the fork's `pyproject.toml`
+`[tool.poetry.dependencies]` (or `[project.dependencies]`) against
+the last released version's on PyPI. Anything NEW on the fork side is
+a candidate to add explicitly to install instructions.
+
 ## HAOS-specific debugging
 
 ### py-spy doesn't work on HAOS, memray does
