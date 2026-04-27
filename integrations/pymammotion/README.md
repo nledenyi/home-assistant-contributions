@@ -43,12 +43,7 @@ zone B.
 
 ## Workaround (historical)
 
-See [`pymammotion-work-zone-PR-draft.md`](pymammotion-work-zone-PR-draft.md)
-for the draft PR body (not posted since upstream merged their own fix).
-
-Our HA instance ran the forked `v0.6.7.post1` branch for a few days
-during the test window, then reverted to the official release once
-`v0.7.x` shipped with the equivalent fix.
+A fork branch `v0.6.7.post1` carried the fix during the test window. Upstream merged an equivalent fix in `v0.7.x`; our HA reverted to the official release once that shipped. The full investigation is in [`pymammotion-work-zone-stale-read.md`](pymammotion-work-zone-stale-read.md).
 
 ## Lessons
 

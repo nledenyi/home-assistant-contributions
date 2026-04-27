@@ -142,6 +142,6 @@ Both shipped together in #252's commits `78c17b3` and `88b3774` respectively.
 ## Cross-links
 
 - Full investigation journey (with git blame, rate-limit rabbit hole, and measurement methodology): this file.
-- Workaround for reporters who want to test the fork before it's merged: [`ha_toyota-282-comment.md`](ha_toyota-282-comment.md).
-- PR body as submitted: [`ha_toyota-282-PR-body.md`](ha_toyota-282-PR-body.md).
-- Schema-drift fix, separate concern: [`README.md`](README.md), [`PR-249-body.md`](PR-249-body.md).
+- The first PR ([ha_toyota#283](https://github.com/pytoyoda/ha_toyota/pull/283)): event-loop wrapper removal.
+- The residual-leak follow-up ([pytoyoda#252](https://github.com/pytoyoda/pytoyoda/pull/252)) shipped as pytoyoda v5.1.0.
+- Schema-drift fix, separate concern: [`README.md`](README.md).
