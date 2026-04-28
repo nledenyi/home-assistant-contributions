@@ -29,6 +29,7 @@ Public portfolio of Home Assistant-adjacent work: integration bug fixes, dashboa
 |---|---|
 | [`skills/ha-section-card/`](skills/ha-section-card/) | Build a Home Assistant dashboard section card following a consistent unified-look design pattern. Uses Bubble-Card + card-mod + reusable Bubble-Card modules. |
 | [`skills/ha-integration-fix/`](skills/ha-integration-fix/) | End-to-end workflow to diagnose and fix a bug in an HA custom integration: fork, reproduce, patch, test, PR, and post a workaround comment on the integration issue. |
+| [`skills/ha-custom-card-development/`](skills/ha-custom-card-development/) | Build, test, and deploy a Lovelace custom card from scratch (TypeScript + Lit, single-file ES module). Covers Lovelace lifecycle contract, Lit reactivity, theming + accessibility, visual editor, dev/deploy workflow, HACS publishing. |
 
 ## Reading order for a new bug
 
