@@ -588,6 +588,43 @@ Latest ha_toyota release at the time was v2.2.2 from 2026-03-06
 the `Event loop is closed` regression on stable v2.2.2 + 5.1.0
 combo until a v2.2.3 release was cut from current main.
 
+## Step 8b. Reviewing the downstream release-prep PR
+
+When a maintainer opens a "bump version + lockfile" PR after your fix merges, your review value is the auto-update gate check. Once tagged, the release auto-updates to every HACS user with auto-update on, with no further review.
+
+Six things to verify (in order):
+
+1. **Diff scope.** The PR should touch only `manifest.json`, `pyproject.toml`, and `poetry.lock` (or the equivalents). Any code changes hidden in the diff are out-of-scope and should be split.
+
+2. **Version + pin consistency.** `manifest.json#version`, `manifest.json#requirements`, `pyproject.toml#version`, and `pyproject.toml#dependencies` should all line up. If the manifest says `pytoyoda>=5.1.0,<6.0` the pyproject should say `pytoyoda = "^5.1.0"` or compatible.
+
+3. **Migration safety on existing config entries.** Run:
+   ```sh
+   grep -nE 'entry\.options\[|entry\.options\.get\(' custom_components/<name>/*.py
+   ```
+   Every `.get()` should have a `DEFAULT_*` second arg. Any `entry.options[KEY]` (no default) is a migration trap — existing v(N-1) entries don't have the key and would `KeyError` on load. Same check for `entry.data[KEY]` accesses.
+   Also diff CONF_* keys vs the previous release: only additions are safe; removed keys break in-flight migrations.
+
+4. **Default behaviour parity.** Walk every new option's `DEFAULT_*` value. The defaults applied to existing entries (which lack any options) should produce v(N-1)-equivalent behaviour. Smart-strategy "active by default" is fine if the strategy's defaults (idle wake, post-stop POST counts, etc.) are themselves benign. The user-visible cadence shouldn't change without consent.
+
+5. **Cross-package dependency skew.** This is the one most likely to bite. The client release may pull in transitive bumps (`httpx`, `pydantic`, `pyjwt`, `typing-extensions`, etc.) that exceed what HA Core ships at the `hacs.json#homeassistant` minimum. When the integration auto-updates, HA Core's installer runs `pip install <client>>=<new>` which **force-upgrades the transitive in the HA venv** to satisfy the client. If HA Core itself uses that transitive's APIs, runtime breakage in unrelated parts of HA can follow.
+
+   To check, for each transitive dep that your client pins:
+   ```sh
+   # client's pyproject (the new release)
+   gh api repos/<client-org>/<client>/contents/pyproject.toml?ref=v<X.Y.Z> \
+     -H 'Accept: application/vnd.github.raw' | grep -E '^httpx|^pydantic|^pyjwt|^typing-extensions'
+   # HA Core at the integration's HACS-minimum HA version
+   gh api repos/home-assistant/core/contents/pyproject.toml?ref=<hacs-min-ha-version> \
+     -H 'Accept: application/vnd.github.raw' | grep -E '"httpx|"pydantic|"pyjwt|"typing-extensions'
+   ```
+
+   If the client requires a version higher than HA's pin range, **the integration's `hacs.json#homeassistant` should bump to the first HA Core version whose pin range satisfies the client.** Otherwise you ship a release that breaks HA Core for users on older HA installs.
+
+   Real example (2026-04-28, ha_toyota#290): pytoyoda 5.1.0 required `httpx ^0.28.1`. The integration's `hacs.json#homeassistant` was `2025.1.0`, but HA 2025.1.x - 2025.3.x ships `httpx==0.27.2`. HA 2025.4 was the first to ship `httpx==0.28.1`. Approving without raising the HACS minimum to 2025.4.0 would have force-upgraded httpx in HA Core's venv on three released HA versions that weren't tested with httpx 0.28. Flagged in review; bumped before tag.
+
+6. **CI green.** Hassfest, HACS, Codacy, pytest, pre-commit. Codacy "complexity" warnings on existing files are usually safe to wave through if the previous release also had them. Hassfest must be clean.
+
 ## Step 9. Update the catalogue
 
 1. Update `/home/claude/home-assistant/README.md` with a row for this fix.
@@ -631,3 +668,9 @@ combo until a v2.2.3 release was cut from current main.
 - Don't push a PR without running Hassfest locally first when the
   changes touch services.yaml, manifest.json, translations, or
   iqs.yaml. CI will catch it but you'll have to round-trip.
+- Don't approve a release-prep PR without checking dependency skew
+  between the bumped client and HA Core's pins at the integration's
+  HACS HA minimum. A client bump that exceeds HA Core's pin range
+  force-upgrades the transitive in the HA venv at install time and
+  can break HA Core's other code on the released HA versions
+  in-between. See Step 8b for the check.
