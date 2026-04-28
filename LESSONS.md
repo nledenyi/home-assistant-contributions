@@ -266,6 +266,14 @@ wrapper crashes at runtime.
 
 Mitigation, in priority order:
 
+0. **Write a compatibility note in the client PR description.** Before
+   any of the runtime mitigations, the cheapest gate is documenting
+   the cross-repo coupling in the PR body where the maintainer can see
+   it. Format: a short "Compatibility" section listing the wrapper PRs
+   that need to be merged before this client release ships, with a
+   recommendation to coordinate timing. We didn't write one for
+   pytoyoda#252 and that's how the regression hit users; the maintainer
+   merged + released the same day in good faith without that context.
 1. **Coordinate the merges**: open the wrapper PR before cutting the
    client release; prefer to merge the wrapper PR same-day or sooner.
 2. **If you can't coordinate**, the wrapper PR stays open and ready
@@ -278,11 +286,16 @@ Mitigation, in priority order:
 
 Real example (2026-04-27): pytoyoda#252 (client) merged 11:47Z, released
 as v5.1.0 on PyPI 12:04Z. ha_toyota#283 (wrapper, removes the per-call
-event-loop helper) approved but not yet merged. pytoyoda 5.1.0's
-persistent httpx client + stock ha_toyota's wrapper = `RuntimeError:
-Event loop is closed` on the second cycle for any user who
-auto-updated. Fork install of ha_toyota was the workaround until #283
-merged.
+event-loop helper) was approved but not yet merged at that point.
+pytoyoda 5.1.0's persistent httpx client + stock ha_toyota's wrapper =
+`RuntimeError: Event loop is closed` on the second cycle for any user
+who auto-updated. ha_toyota#283 merged later the same evening
+(17:14Z), so `main` is fixed, but the latest tagged ha_toyota release
+remained v2.2.2 (March, pre-#283); HACS users on auto-update still
+landed in the broken combo until a new release tag was cut.
+Fork-install gist (mitigation #3) was the bridge in the meantime. The
+missed compatibility note (mitigation #0) was the root cause of how
+widely the regression hit before the wrapper merge caught up.
 
 ### `--no-deps` is the right safety flag, but it's a knife edge
 
