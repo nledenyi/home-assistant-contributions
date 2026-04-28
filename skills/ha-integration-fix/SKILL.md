@@ -259,6 +259,50 @@ poetry run pytest
 Add a regression test that would fail on main before the fix. This is
 the single best signal the maintainer looks at during review.
 
+### 5a. Run Hassfest locally before pushing the PR
+
+Hassfest is HA's official integration linter. CI runs it on every PR
+to the integration repo; failing means the PR can't merge. You can run
+the same validator in a local Docker container in ~30 ms, which is
+faster than a 30-second CI cycle:
+
+```sh
+docker run --rm \
+  -v /path/to/your-integration/custom_components/<name>:/github/integration/<name> \
+  --entrypoint sh ghcr.io/home-assistant/hassfest:latest \
+  -c 'cd /usr/src/homeassistant && python -m script.hassfest \
+      --action validate \
+      --integration-path /github/integration/<name> \
+      -p services,manifest,json,translations'
+```
+
+Expected clean output: `Integrations: 1 / Invalid integrations: 0`.
+
+**Skip the `quality_scale` plugin** for custom integrations - it expects
+a full HA core checkout with `.strict-typing` etc. and fails out
+unrelated. Run it only if you're contributing to HA core itself.
+
+Real example: ha_toyota#286 had `target: { device: { integration: toyota } }`
+in `services.yaml` (the inline-filter-on-target shape). Hassfest CI
+flagged `[ERROR] [SERVICES] Invalid services.yaml: Services do not
+support device filters on target, use a device selector instead`. The
+fix was a `device_id` field with a `device` selector under `fields:`.
+Catching this locally before push would have skipped the back-and-forth
+on the PR.
+
+Add a one-liner Make target / shell alias for this so it's frictionless:
+
+```sh
+# in the fork repo:
+hassfest() {
+  docker run --rm -v "$PWD/custom_components/<name>:/github/integration/<name>" \
+    --entrypoint sh ghcr.io/home-assistant/hassfest:latest \
+    -c "cd /usr/src/homeassistant && python -m script.hassfest \
+        --action validate --integration-path /github/integration/<name> \
+        -p services,manifest,json,translations"
+}
+```
+
 ## Step 6. Install the fork into HA and verify
 
 ```bash
@@ -387,6 +431,46 @@ When the dependency PR is also yours and you can't keep two branches
 in sync without manual rebases, accept the rebases. They're cheap
 relative to the cost of an unreviewable diff.
 
+### Cross-repo coupling: paired client + wrapper changes
+
+A separate failure mode from same-repo stacked PRs: when your fix
+spans **two repos** (the client library and the HA wrapper) and the
+client release would break the stable wrapper. Common shape: client
+gains a behavioural change (persistent connection, new auth flow,
+schema rename) that the wrapper currently doesn't handle. Once the
+client cuts a release on PyPI, anyone whose HA satisfies the
+wrapper's `requirements` pin auto-upgrades the client and the stable
+wrapper crashes.
+
+**Always write a "Compatibility" section in the client PR body**
+before requesting review. Format:
+
+```markdown
+## Compatibility
+
+This PR contains a behavioural change that requires a matching
+update on the wrapper side: <wrapper-repo>#<wrapper-pr-number>.
+Recommend not cutting a release until the wrapper PR is merged
+AND a new wrapper release is tagged. Otherwise users on
+auto-update will hit `<expected error>` because their stable
+wrapper version (`v<X.Y.Z>` from <date>) predates the wrapper PR.
+```
+
+The maintainer reads PR bodies, not your private mental model of
+the cross-repo dependency. If you don't surface it, they merge +
+release in good faith and the regression hits the integration's
+issue tracker the same evening.
+
+This is mitigation #0 in `LESSONS.md#manifest-pin-coordination` —
+cheaper than coordinating merges (#1), surfacing the regression on
+issues (#2), or shipping a fork-install gist (#3).
+
+If the client PR is already merged + released by the time you
+realise the coupling, fall back to mitigations #1-#3 in order. The
+fork-install gist is the user-visible bridge, but it doesn't
+substitute for cutting the wrapper release; flag the wrapper-release
+gap on the most active integration issue + tag the maintainer.
+
 ## Step 7b. Pre-PR cleanup pass (iterative-feature work only)
 
 Skip if your branch is already a single clean commit; this section is
@@ -480,6 +564,30 @@ will show them. Re-stage and `git commit --amend` before pushing.
    wants scope changed.
 3. `gh issue comment <num> --repo <org>/<integration-repo> --body-file <path>`
 
+### After your wrapper PR merges: check the release-tag state
+
+A merge into the wrapper's `main` is NOT yet visible to HACS users.
+HACS pulls the latest *tagged release* (or the asset attached to
+it), not the default branch. After your PR merges:
+
+1. Check `gh release view --repo <org>/<wrapper> --json tagName,publishedAt`.
+2. If the latest tag predates your merge commit, HACS users still
+   run the broken pre-merge code. Tagged release cadence is at the
+   maintainer's discretion; if the regression you just fixed is
+   biting users in production, post a one-line note on a relevant
+   open issue: "merged to main; HACS users still on `vX.Y.Z` until
+   a new release is tagged - flagging in case the maintainer wants
+   to cut one." Tag the maintainer who merged.
+3. Don't open a tracking issue for the release tag itself, and
+   don't @-bomb the maintainer in multiple places. One mention on
+   the most active relevant thread is the right cadence.
+
+Real example (2026-04-28): ha_toyota#283 merged 2026-04-27 17:14Z.
+Latest ha_toyota release at the time was v2.2.2 from 2026-03-06
+(50 days old). HACS users who auto-updated pytoyoda to 5.1.0 hit
+the `Event loop is closed` regression on stable v2.2.2 + 5.1.0
+combo until a v2.2.3 release was cut from current main.
+
 ## Step 9. Update the catalogue
 
 1. Update `/home/claude/home-assistant/README.md` with a row for this fix.
@@ -512,3 +620,14 @@ will show them. Re-stage and `git commit --amend` before pushing.
   per-PR review of the body text is the final gate.
 - Don't delete the fork branch after merge - the workaround comment's
   pip install URL still needs to resolve for users on older HA versions.
+- Don't cut a client release without checking whether stable
+  wrappers can handle the new behaviour. If they can't, write a
+  Compatibility note (Step 7 sub-section) and stall the release
+  until the wrapper PR merges + tags.
+- Don't assume "wrapper PR merged" means "fix is live for users".
+  HACS pulls tagged releases, not main. Check the release tag
+  state after every wrapper merge; nudge if the latest tag is
+  significantly older than the merge.
+- Don't push a PR without running Hassfest locally first when the
+  changes touch services.yaml, manifest.json, translations, or
+  iqs.yaml. CI will catch it but you'll have to round-trip.
