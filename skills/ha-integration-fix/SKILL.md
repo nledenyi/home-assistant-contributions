@@ -334,6 +334,59 @@ To detect this proactively before users hit it, diff the fork's
 on PyPI - any addition in the fork's list needs to be installed
 explicitly in the gist instructions.
 
+**Fork-tag gotcha: dynamic-versioned packages need the latest version
+tag pushed to the fork.** When the upstream package uses
+`setuptools-scm` or `poetry-dynamic-versioning` (very common - check
+`pyproject.toml` for `dynamic = ["version", ...]` or
+`[tool.poetry-dynamic-versioning]`), the version string is computed
+from `git describe --tags` at install time. Pushing your feature
+branch to the fork is NOT enough: `git push origin <branch>` does not
+push tags. If the latest upstream version tag (e.g. `v5.1.0`) is
+missing on your fork remote, the user's pip clone will only see older
+tags, fall back to the previous one, and produce a version string
+like `5.0.0.post20.dev0+<sha>` instead of `5.1.0.post1.dev0+<sha>`.
+
+**This is a silent failure mode.** The first install + verify checks
+pass cleanly. The next time HA Core restarts, it re-resolves the
+integration's manifest pin (`pkg>=5.1.0,<6.0`), sees
+`5.0.0.post20.dev0` is less than `5.1.0` per PEP 440, and silently
+`pip install`s the upstream version from PyPI - wiping the fork. The
+user thinks the fork is running; it is not.
+
+Detect proactively. Inside the HA container, after install, run:
+
+```python
+import importlib.metadata, json
+dist = importlib.metadata.distribution("<pkg>")
+print("Version:", dist.version)
+url_json = dist.read_text("direct_url.json")
+if url_json:
+    info = json.loads(url_json)
+    print("Source :", info.get("url"))
+    print("Branch :", info.get("vcs_info", {}).get("requested_revision"))
+    print("Commit :", info.get("vcs_info", {}).get("commit_id", "")[:8])
+else:
+    print("Source : PyPI (NOT the fork)")
+```
+
+If `Version` starts with a number lower than the manifest's `>=` pin,
+the tag is missing on the fork. Fix:
+
+```sh
+cd <local fork checkout>
+git fetch upstream
+git push origin <latest-version-tag>   # e.g. v5.1.0
+```
+
+Then have the user re-run `pip install --force-reinstall ...` so pip
+recomputes the version with the now-visible tag in scope. The new
+install reports a `<latest-tag>.postN.dev0+<sha>` version that
+satisfies the manifest pin and survives HA restarts.
+
+When you push install instructions to a gist / issue comment, include
+the verify script above with explicit expected output so users catch
+this themselves before restarting HA.
+
 **Critical gotcha after pip install**: `pip install --force-reinstall`
 updates files on disk but does NOT reload modules already imported into
 the running HA Core process. If your custom integration holds a
