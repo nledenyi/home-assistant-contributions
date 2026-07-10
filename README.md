@@ -1,6 +1,12 @@
 # Home Assistant contributions
 
-Public portfolio of Home Assistant-adjacent work: integration bug fixes, dashboard patterns, reusable Claude Code skills, and accumulated lessons from debugging custom integrations.
+Public portfolio of Home Assistant-adjacent work: integrations built from scratch, integration bug fixes, dashboard patterns, reusable Claude Code skills, and accumulated lessons from debugging custom integrations.
+
+## Integrations built from scratch
+
+| Integration | What | Links | Writeup |
+|---|---|---|---|
+| blueconnect-ble (2026 Zodiac Blue Connect Gold pool sensor) | Local, cloud-free passive BLE integration: protocol reverse engineering (two interleaved advert streams, rotating MAC), 6 sensor entities, calibration options, multi-agent pre-release review, HACS release | [Repo](https://github.com/nledenyi/blueconnect-ble), [v0.1.0](https://github.com/nledenyi/blueconnect-ble/releases/tag/v0.1.0), [community thread](https://community.home-assistant.io/t/zodiac-2026-version-blue-connect-pool-water-quality-monitor/1015005) | [`integrations/blueconnect-ble/`](integrations/blueconnect-ble/) |
 
 ## Integration fixes
 
@@ -30,6 +36,7 @@ Public portfolio of Home Assistant-adjacent work: integration bug fixes, dashboa
 | [`skills/ha-section-card/`](skills/ha-section-card/) | Build a Home Assistant dashboard section card following a consistent unified-look design pattern. Uses Bubble-Card + card-mod + reusable Bubble-Card modules. |
 | [`skills/ha-integration-fix/`](skills/ha-integration-fix/) | End-to-end workflow to diagnose and fix a bug in an HA custom integration: fork, reproduce, patch, test, PR, and post a workaround comment on the integration issue. |
 | [`skills/ha-custom-card-development/`](skills/ha-custom-card-development/) | Build, test, and deploy a Lovelace custom card from scratch (TypeScript + Lit, single-file ES module). Covers Lovelace lifecycle contract, Lit reactivity, theming + accessibility, visual editor, dev/deploy workflow, HACS publishing. |
+| [`skills/ha-custom-integration/`](skills/ha-custom-integration/) | Develop and publish an own HA custom integration end to end: hassfest/HACS requirements, entity best-practice checklist (every item a real caught bug), rotating-MAC Bluetooth patterns, HA-free tests, privacy-safe publishing, tagged releases. |
 
 ## Reading order for a new bug
 
