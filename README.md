@@ -8,6 +8,14 @@ Public portfolio of Home Assistant-adjacent work: integrations built from scratc
 |---|---|---|---|
 | blueconnect-ble (2026 Zodiac Blue Connect Gold pool sensor) | Local, cloud-free passive BLE integration: protocol reverse engineering (two interleaved advert streams, rotating MAC), 6 sensor entities, calibration options, multi-agent pre-release review, HACS release | [Repo](https://github.com/nledenyi/blueconnect-ble), [v0.1.0](https://github.com/nledenyi/blueconnect-ble/releases/tag/v0.1.0), [community thread](https://community.home-assistant.io/t/zodiac-2026-version-blue-connect-pool-water-quality-monitor/1015005) | [`integrations/blueconnect-ble/`](integrations/blueconnect-ble/) |
 
+## Custom Lovelace cards
+
+| Card | What | Links |
+|---|---|---|
+| journey-viewer-card | Paginated GPS journey viewer (drives, rides, runs): Leaflet map with EV/ICE / overspeed / highway polyline colouring, configurable stats grid (thresholds, gradients, bars, trend arrows), visual editor, and recorder-friendly lazy route loading via an HA service call. TypeScript + Lit, single-file ES module, HACS-installable. Pre-release hardening: multi-agent review (best-practices + HACS compliance + PII sweep of full git history), 20+ findings fixed and verified live via Playwright | [Repo](https://github.com/nledenyi/journey-viewer-card), [v0.1.0](https://github.com/nledenyi/journey-viewer-card/releases/tag/v0.1.0) |
+
+Development playbook distilled from this card lives in [`skills/ha-custom-card-development/`](skills/ha-custom-card-development/).
+
 ## Integration fixes
 
 | Integration | Status | Upstream PR / issue | Lives in |

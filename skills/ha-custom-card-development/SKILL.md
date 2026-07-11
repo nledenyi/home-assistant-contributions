@@ -251,6 +251,110 @@ The npm package `custom-card-helpers` is the de-facto canonical source for HA fr
 
 For our stack (already declaring `Window` ourselves), vendoring is cleaner. Pick one and document the choice in the project README.
 
+### 1h. Lazy-loading large per-entity data via service / WS command
+
+If your card needs bulk per-entity data (route polylines, weather forecast points, calendar events, image frames, time-series), **do NOT read it from `hass.states[entity].attributes`**. Entity attributes are written to the recorder DB on every state change and broadcast over WebSocket to every UI subscriber - they're meant for small, frequently-updated state, not bulk payloads.
+
+This is the textbook HA pattern. The canonical reference is HA core's 2024.x weather-forecast deprecation: weather entities used to expose `forecast` as a 50+ kB attribute array, which blew up recorder DB size and WS bandwidth. HA core moved forecasts to the `weather.get_forecasts` service (and a `weather/subscribe_forecast` WS command). Same shape applies to:
+
+- **camera entities** - never the binary stream in attributes; dedicated proxy URL
+- **calendar** - events fetched via `calendar.list_events` service, not attributes
+- **frigate** event clips - WS subscriptions
+- **MQTT image** - URL in attributes, image fetched separately
+
+The principle HA core articulates: **entity state should be small and frequently-updated; large data should be fetched on-demand via service calls or WS commands.** Threshold to watch: HA logs a warning when an entity's attribute payload exceeds 16 KiB and refuses to record it past that. If your design pushes past 16 KiB per state change, redesign the data flow, don't ignore the warning.
+
+Recommended shape for a card consuming an integration that exposes bulk data:
+
+**On the integration side:**
+1. Sensor's `extra_state_attributes` carries metadata only (timestamps, ids, counts, summary stats).
+2. New service `<integration>.get_<thing>` with `supports_response=SupportsResponse.ONLY`, taking `device_id` + a record id, returning `{found, <id>, <bulk_payload>}`.
+
+**On the card side:**
+
+```ts
+class MyCard extends LitElement {
+  // Per-card cache of fetched bulk data. Keyed by record id (UUID, etc).
+  // Lifetime is the card instance; navigation back to a previously-viewed
+  // record doesn't re-issue the service call.
+  private cache = new Map<string, BulkPayload>();
+  // Records whose fetch is currently in flight; debounces duplicate
+  // kickoffs from successive `updated()` cycles.
+  private inFlight = new Set<string>();
+
+  protected override updated(_changed: PropertyValues): void {
+    const record = this.currentRecord;
+    if (record) {
+      this.renderResolved(this.resolveRecord(record));
+      this.maybeLoad(record);
+    }
+  }
+
+  /** Return record with bulk fields filled from cache (or empty). */
+  private resolveRecord(r: Record): Record {
+    if (r.bulk?.length) return r;  // fixture mode - already populated
+    const cached = this.cache.get(r.id);
+    return cached ? { ...r, bulk: cached } : r;
+  }
+
+  private maybeLoad(r: Record): void {
+    if (r.bulk?.length) return;        // already have data (fixture mode)
+    if (!r.bulk_count) return;         // no data exists for this record
+    if (this.cache.has(r.id)) return;  // already cached
+    if (this.inFlight.has(r.id)) return;
+    if (!this.hass) return;
+
+    // hass.entities is a Record<entity_id, EntityRegistryDisplayEntry>
+    // present in HA 2023.4+ but not typed by custom-card-helpers.
+    const entityReg = (this.hass as unknown as {
+      entities?: Record<string, { device_id?: string }>;
+    }).entities?.[this.config.source_entity];
+    const deviceId = entityReg?.device_id;
+    if (!deviceId) return;
+
+    this.inFlight.add(r.id);
+    // hass.callService(domain, service, data, target, notifyOnError, returnResponse)
+    // The 6th arg (returnResponse) is present at runtime since HA 2024.4
+    // but missing from custom-card-helpers types - cast to unknown first.
+    const callService = (this.hass as unknown as {
+      callService: (
+        d: string, s: string, data: object, target?: unknown,
+        notifyOnError?: boolean, returnResponse?: boolean,
+      ) => Promise<{ response?: { bulk?: BulkPayload } }>;
+    }).callService;
+
+    callService(
+      "<integration>", "get_<thing>",
+      { device_id: deviceId, record_id: r.id },
+      undefined, false, true,
+    )
+      .then((resp) => {
+        this.cache.set(r.id, resp?.response?.bulk ?? []);
+        this.requestUpdate();  // re-render with the populated record
+      })
+      .catch((err: unknown) => {
+        // Network glitch / service unavailable / invalid id.
+        // Don't throw - leave the record without bulk data, log once.
+        // Next navigation back to this record will retry.
+        console.warn(`<integration>.get_<thing> failed for ${r.id}`, err);
+      })
+      .finally(() => {
+        this.inFlight.delete(r.id);
+      });
+  }
+}
+```
+
+Three idioms worth highlighting:
+
+1. **`hass.entities[entity_id].device_id`** - the canonical way to map entity → device for service calls. Available since HA 2023.4 but missing from `custom-card-helpers` types; cast through `unknown`.
+2. **6-arg `hass.callService`** - the 5th and 6th positional args (`notifyOnError`, `returnResponse`) are present at runtime since HA 2024.4 but the published `custom-card-helpers` types still show only 4. Cast through `unknown` and document the cast.
+3. **`Set<string>` debounce** - `updated()` fires on every reactive change; without the in-flight set you'll fire 3-5 service calls per record while Lit settles. Always pair the cache `Map` with an in-flight `Set`.
+
+Make the service-name configurable (e.g. `SourceConfig.bulk_service?: string`, default `"<integration>.get_<thing>"`) so the same card can talk to multiple integrations of the same general shape, and so empty string disables lazy-load for fixture mode.
+
+Don't let in-flight state leak across cards: if multiple instances of the card share a singleton cache module-globally, request collisions and stale entries become a debug nightmare. Keep the `cache` and `inFlight` as instance fields on the LitElement.
+
 ## Step 2. Lit reactivity
 
 ### 2a. `shouldUpdate` should NOT watch all of hass
@@ -626,14 +730,14 @@ Single-file ES module → `/config/www/community/<name>/<name>.js`. The deploy s
 npm run build
 
 # 2. Copy into HA's container. Path on PVE host shares to VM via base64 stream:
-sudo qm guest exec 101 --pass-stdin 1 -- bash -c 'cat > /tmp/build.b64' \
+sudo qm guest exec <ha-vm-id> --pass-stdin 1 -- bash -c 'cat > /tmp/build.b64' \
   < <(base64 -w0 dist/<name>.js)
-sudo qm guest exec 101 -- bash -c \
+sudo qm guest exec <ha-vm-id> -- bash -c \
   "base64 -d /tmp/build.b64 > /tmp/build.js && \
    docker cp /tmp/build.js homeassistant:/config/www/community/<name>/<name>.js"
 
 # 3. Bump cache-bust version in lovelace_resources
-sudo qm guest exec 101 -- docker exec homeassistant python -c "
+sudo qm guest exec <ha-vm-id> -- docker exec homeassistant python -c "
 import json
 with open('/config/.storage/lovelace_resources') as f: d = json.load(f)
 for r in d['data']['items']:
@@ -810,7 +914,7 @@ Submitting to default lists is a separate quality bar — most cards live as cus
 
 ## Real-world example
 
-A paginated GPS journey viewer (working name: `journey-viewer-card`) reading trips from `sensor.<vehicle>_recent_trips`. ~3000 LOC of TS + Lit + Leaflet, single-file ES module ~407 KB / 102 KB gzipped. Deployed to HA + driven by [`ha_toyota:feat/recent-trips-sensor`](https://github.com/nledenyi/ha_toyota/tree/feat/recent-trips-sensor) producing the trip data. A showcase Lovelace view exercises every config option with live data. Repo not yet public; the lessons in this skill are the durable artefact.
+`/nvme-storage/code/journey-viewer-card/` — a paginated GPS journey viewer reading trips from `sensor.<vehicle>_recent_trips`. ~3000 LOC of TS + Lit + Leaflet, single-file ES module ~407 KB / 102 KB gzipped. Deployed to HA + driven by [`ha_toyota:feat/recent-trips-sensor`](https://github.com/nledenyi/ha_toyota/tree/feat/recent-trips-sensor) producing the trip data. Showcase view at `/lovelace-playground/journey-showcase` exercises every config option with live RAV4 data.
 
 This skill's content is distilled from the cleanup pass on that card on 2026-04-27, augmented with online research across HA developer docs, custom-card-helpers, and three reference cards (mushroom, apexcharts-card, button-card).
 
